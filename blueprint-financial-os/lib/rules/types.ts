@@ -36,9 +36,11 @@ export interface LowEquityMarginBand {
 export interface LenderPolicy extends RuleSetMeta {
   lender: string;
   stressRate: number;
+  /** true when stressRate is a floor — loans test at max(actual rate, floor) */
+  stressRateIsFloor?: boolean;
   maxTermYears: number;
   otScaling: number;
-  boarderScaling: { percent: number; maxBoarders: number };
+  boarderScaling: { percent: number; maxBoarders: number; maxPerBoarderWeekly?: number };
   rentalScaling: number;
   /** weekly → monthly multiplier used when scaling rent/board */
   weeklyToMonthly: number;
@@ -49,8 +51,16 @@ export interface LenderPolicy extends RuleSetMeta {
     couple: number;
     perDependant: number;
     perVehicle: number;
+    /** share of gross monthly household income added to the benchmark
+     *  (e.g. ASB adds 7% of GMI on top of the base allowances) */
+    incomeLinkedRate?: number;
   };
+  /** hex colour + short mark for UI identification chips (not logo artwork) */
+  brand?: { color: string; textColor?: string; mark: string };
   minUMI: { threshold: number; below: number; above: number };
+  /** true → the UMI floor is deducted before sizing capacity (a $500 surplus
+   *  must REMAIN at max lending); false/absent → workbook gate semantics. */
+  umiFloorIsDeduction?: boolean;
   dtiMultiple: number;
   lvrPolicy: { ownerOccupiedMax: number; investmentMax: number };
   lowEquityMargins: LowEquityMarginBand[];

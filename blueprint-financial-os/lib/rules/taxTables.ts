@@ -29,13 +29,18 @@ export const TAX_WORKBOOK: TaxTable = {
   studentLoanThresholdMonthly: 1670,
 };
 
-/** Current PAYE thresholds (from 31 July 2024), including the 39% band. */
+/**
+ * Current PAYE thresholds (from 31 Jul 2024) with ACC earner levy settings as
+ * verified against the ANZ/BNZ/Westpac servicing calculators (Jun–Jul 2026
+ * releases): levy 1.75%, max leviable income $156,641 (max levy $2,741.22).
+ * Student-loan threshold $24,128/yr (BNZ Sheet1 / ANZ Variables).
+ */
 export const TAX_CURRENT: TaxTable = {
-  id: 'tax-nz-2024',
-  label: 'PAYE table (NZ, from 31 Jul 2024)',
+  id: 'tax-nz-2026',
+  label: 'PAYE + ACC table (NZ, verified vs bank calculators 2026)',
   kind: 'regulation',
-  effectiveFrom: '2024-07-31',
-  source: 'Inland Revenue — personal income tax thresholds',
+  effectiveFrom: '2026-04-01',
+  source: 'IRD thresholds; ACC levy + student-loan settings cross-checked against ANZ/BNZ/Westpac calculators',
   verifiedAt: '2026-08-31',
   brackets: [
     { from: 0, rate: 0.105 },
@@ -44,8 +49,8 @@ export const TAX_CURRENT: TaxTable = {
     { from: 78100, rate: 0.33 },
     { from: 180000, rate: 0.39 },
   ],
-  accRate: 0.014,
-  accMaxIncome: 142283,
+  accRate: 0.0175,
+  accMaxIncome: 156641,
   studentLoanRate: 0.12,
-  studentLoanThresholdMonthly: 2073,
+  studentLoanThresholdMonthly: 24128 / 12,
 };

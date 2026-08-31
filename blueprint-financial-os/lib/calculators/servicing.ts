@@ -127,9 +127,10 @@ export function computeServicing(
   const boarderWk = opts.boarderPerWeekOverride ?? client.boarderIncomePerWeek ?? 0;
   const boarderCount = Math.min(opts.boarderCount ?? (boarderWk > 0 ? 1 : 0), policy.boarderScaling.maxBoarders);
   if (boarderWk > 0 && boarderCount > 0) {
-    const weekly = boarderWk * boarderCount;
-    const actualMonthly = (weekly * 52) / 12;
-    const recognised = weekly * policy.weeklyToMonthly * policy.boarderScaling.percent;
+    const cap = policy.boarderScaling.maxPerBoarderWeekly;
+    const recognisedPerBoarderWk = cap ? Math.min(boarderWk, cap) : boarderWk;
+    const actualMonthly = (boarderWk * boarderCount * 52) / 12;
+    const recognised = recognisedPerBoarderWk * boarderCount * policy.weeklyToMonthly * policy.boarderScaling.percent;
     lines.push({
       id: 'boarder',
       label: boarderCount > 1 ? `Boarders × ${boarderCount}` : 'Boarder income',
@@ -137,7 +138,7 @@ export function computeServicing(
       actualMonthly,
       recognisedMonthly: recognised,
       scaling: policy.boarderScaling.percent,
-      why: `Boarder income is scaled to ${Math.round(policy.boarderScaling.percent * 100)}% — the lender allows for the cost of hosting (power, water, food). Max ${policy.boarderScaling.maxBoarders} boarder(s) recognised.`,
+      why: `Boarder income is scaled to ${Math.round(policy.boarderScaling.percent * 100)}%${cap ? `, capped at $${cap}/wk per boarder` : ''} — the lender allows for the cost of hosting. Max ${policy.boarderScaling.maxBoarders} boarder(s) recognised.`,
     });
   }
 
@@ -145,13 +146,23 @@ export function computeServicing(
 
   // Living expenses
   const bench = policy.expenseBenchmark;
-  const base = client.household.adults === 2 ? bench.couple : bench.single;
+  let base = client.household.adults === 2 ? bench.couple : bench.single;
+  const grossMonthlyHousehold =
+    client.applicants.reduce((s, a) => s + a.incomes.reduce((t, i) => t + i.grossAnnual * salaryMult, 0), 0) / 12;
+  let incomeLinkedNote: string | undefined;
+  if (bench.incomeLinkedRate) {
+    const uplift = grossMonthlyHousehold * bench.incomeLinkedRate;
+    base += uplift;
+    incomeLinkedNote = ` incl. ${(bench.incomeLinkedRate * 100).toFixed(0)}% of gross monthly income ($${Math.round(uplift).toLocaleString()}) — this lender's benchmark scales with earnings.`;
+  }
   const fixed = client.expenses.fixedCommitmentsMonthly.reduce((s, i) => s + i.amount, 0);
   const livingItems = [
     {
       label: client.household.adults === 2 ? 'Household baseline (couple)' : 'Household baseline (single)',
       amount: base,
-      note: 'What the lender assumes it costs the household to live, breathe and eat at a minimum — no discretionary spending.',
+      note:
+        'What the lender assumes it costs the household to live, breathe and eat at a minimum — no discretionary spending.' +
+        (incomeLinkedNote ?? ''),
     },
     {
       label: `Vehicles × ${client.household.vehicles}`,
@@ -180,17 +191,22 @@ export function computeServicing(
   }
   const livingTotal = livingItems.reduce((s, i) => s + i.amount, 0);
 
-  // Debt servicing at stress
+  // Debt servicing at stress. Every bank tests at max(actual rate, test
+  // rate/floor) — the floor binds at current pricing, but a high-rate loan
+  // tests at its own rate.
   const debtItems: { label: string; amount: number; note?: string }[] = [];
   const mortgageDebt = client.mortgages.reduce((s, m) => s + m.balance, 0);
   const stressMonthlyRate = policy.stressRate / 12;
   const stressPeriods = policy.maxTermYears * 12;
-  const stressedRepaymentMonthly = mortgageDebt > 0 ? pmt(stressMonthlyRate, stressPeriods, mortgageDebt) : 0;
+  const stressedRepaymentMonthly = client.mortgages.reduce(
+    (s, m) => s + pmt(Math.max(policy.stressRate, m.rate) / 12, stressPeriods, m.balance),
+    0,
+  );
   if (mortgageDebt > 0) {
     debtItems.push({
       label: 'Existing mortgages (stress-tested)',
       amount: stressedRepaymentMonthly,
-      note: `Repayment on $${Math.round(mortgageDebt).toLocaleString()} at ${(policy.stressRate * 100).toFixed(2)}% over ${policy.maxTermYears} years — the rate the lender tests, not the rate you pay.`,
+      note: `Repayment on $${Math.round(mortgageDebt).toLocaleString()} at ${(policy.stressRate * 100).toFixed(2)}%${policy.stressRateIsFloor ? ' (floor — actual rate if higher)' : ''} over ${policy.maxTermYears} years — the rate the lender tests, not the rate you pay.`,
     });
   }
   let cardLimits = 0;
@@ -220,9 +236,15 @@ export function computeServicing(
 
   const umi = recognisedIncomeMonthly - livingTotal - debtTotal;
   const minUMIRequired = mortgageDebt > policy.minUMI.threshold ? policy.minUMI.above : policy.minUMI.below;
-  // Workbook semantics: the minimum-UMI floor is a *gate*, not a deduction —
-  // if UMI clears the floor, capacity is the PV of the full UMI at stress.
-  const maxNewLending = umi > minUMIRequired ? pv(stressMonthlyRate, stressPeriods, umi) : 0;
+  // Two floor semantics:
+  //  - deduction (bank policies, adviser's $500 rule): the floor must REMAIN
+  //    at max lending → capacity = PV(UMI − floor)
+  //  - gate (Blueprint workbook parity): clear the floor → capacity = PV(UMI)
+  const maxNewLending = policy.umiFloorIsDeduction
+    ? Math.max(0, pv(stressMonthlyRate, stressPeriods, umi - minUMIRequired))
+    : umi > minUMIRequired
+      ? pv(stressMonthlyRate, stressPeriods, umi)
+      : 0;
 
   // DTI
   const grossAnnualIncomeForDti =
@@ -299,6 +321,11 @@ export function compareLenders(
       drivers.push(
         `Credit-card limits at ${(p.creditCardMonthlyFactor * 100).toFixed(1)}%/mo vs ${(base.creditCardMonthlyFactor * 100).toFixed(1)}%`,
       );
+    if (p.expenseBenchmark.incomeLinkedRate)
+      drivers.push(`Benchmark scales with income (+${(p.expenseBenchmark.incomeLinkedRate * 100).toFixed(0)}% of gross)`);
+    if (p.boarderScaling.maxPerBoarderWeekly)
+      drivers.push(`Boarder income capped at $${p.boarderScaling.maxPerBoarderWeekly}/wk`);
+    if (p.stressRateIsFloor) drivers.push(`Test rate is a floor — actual rate if higher`);
     return { lender: p.lender, drivers };
   });
   return {

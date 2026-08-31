@@ -1,7 +1,8 @@
 'use client';
 
-import { Card, SectionHeading, Stat, InfoTip, Pill, AnimatedNumber } from '@/components/ui';
-import { BankWaterfall, LenderCapacityChart, RecognitionBars } from '@/components/charts';
+import { Card, SectionHeading, Stat, InfoTip, Pill, AnimatedNumber, BankMark } from '@/components/ui';
+import { BankWaterfall, RecognitionBars } from '@/components/charts';
+import { LENDERS_TO_BE_TESTED } from '@/lib/rules/nzBankPolicies';
 import { money, moneyShort, pct } from '@/lib/format';
 import type { SectionProps } from './types';
 import type { GoalKind } from '@/lib/domain/types';
@@ -333,13 +334,20 @@ export function BankViewSection({ result, openAudit, presentation, ctx, feed }: 
 // ---------------------------------------------------------------------------
 // 04 — Borrowing power
 
-export function CapacitySection({ client, result, openAudit, presentation, addChanges }: SectionProps) {
+export function CapacitySection({ client, result, openAudit, presentation, addChanges, ctx }: SectionProps) {
   const cmp = result.lenderComparison;
-  const rows = cmp.results.map((r) => ({
-    lender: r.lender,
-    capacity: r.maxNewLending,
-    isModel: r.policyId === result.servicing.policyId,
-  }));
+  const rows = cmp.results.map((r) => {
+    const policy = ctx.lenders.find((l) => l.id === r.policyId);
+    return {
+      lender: r.lender,
+      capacity: r.maxNewLending,
+      isModel: r.policyId === result.servicing.policyId,
+      brand: policy?.brand,
+      effectiveFrom: policy?.effectiveFrom,
+      stressRate: policy?.stressRate,
+    };
+  });
+  const maxCapacity = Math.max(...rows.map((r) => r.capacity), 1);
   const fhb = result.fhb;
 
   return (
@@ -377,10 +385,57 @@ export function CapacitySection({ client, result, openAudit, presentation, addCh
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="p-6">
-          <h3 className="font-display text-[15px] font-semibold text-ink">Lender comparison</h3>
-          <LenderCapacityChart rows={rows} />
+          <div className="flex items-baseline justify-between">
+            <h3 className="font-display text-[15px] font-semibold text-ink">Lender comparison</h3>
+            {!presentation ? (
+              <button
+                className="text-[11.5px] font-medium text-teal-500 hover:underline"
+                onClick={() =>
+                  openAudit({
+                    title: 'Lender capacity range',
+                    lines: cmp.results.map((r) => ({ label: r.lender, value: r.maxNewLending, format: 'currency' as const })),
+                    ruleSetIds: cmp.results.map((r) => r.policyId),
+                  })
+                }
+              >
+                Explain this difference
+              </button>
+            ) : null}
+          </div>
+          <div className="mt-4 space-y-2.5">
+            {rows.map((r) => (
+              <div key={r.lender} className="flex items-center gap-3">
+                {r.brand ? (
+                  <span className="w-20"><BankMark mark={r.brand.mark} color={r.brand.color} textColor={r.brand.textColor} /></span>
+                ) : (
+                  <span className="w-20 text-[11px] font-semibold text-slate-500b">{r.lender}</span>
+                )}
+                <div className="h-4 flex-1 overflow-hidden rounded-md bg-mist">
+                  <div
+                    className="h-full rounded-md transition-all duration-500"
+                    style={{ width: `${(r.capacity / maxCapacity) * 100}%`, backgroundColor: r.isModel ? '#14294a' : (r.brand?.color ?? '#2ab3b1'), opacity: r.isModel ? 1 : 0.85 }}
+                  />
+                </div>
+                <div className="w-24 text-right">
+                  <span className="num text-[13px] font-semibold text-ink">{moneyShort(r.capacity)}</span>
+                  {!presentation && r.stressRate ? (
+                    <div className="text-[10px] text-slate-500b">tests @ {pct(r.stressRate)}</div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+            <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500b">To be tested — check with adviser:</span>
+            {LENDERS_TO_BE_TESTED.map((l) => (
+              <span key={l.lender} className="inline-flex items-center gap-1.5" title={`${l.lender} — servicing calculator not yet loaded; confirm with adviser`}>
+                <BankMark mark={l.brand.mark} color={l.brand.color} muted size="sm" />
+                <span className="text-[11px] text-slate-500b">{l.lender}</span>
+              </span>
+            ))}
+          </div>
           {!presentation ? (
-            <div className="mt-2 space-y-1.5">
+            <div className="mt-3 space-y-1.5">
               {cmp.differences
                 .filter((d) => d.drivers.length > 0)
                 .map((d) => (
@@ -388,21 +443,10 @@ export function CapacitySection({ client, result, openAudit, presentation, addCh
                     <span className="font-semibold text-ink">{d.lender}:</span> {d.drivers.join(' · ')}
                   </div>
                 ))}
-              <p className="pt-1 text-[11px] text-slate-500b">
-                Demo lender profiles — structurally faithful, not live bank policy. Every figure can be traced via{' '}
-                <button
-                  className="font-medium text-teal-500 hover:underline"
-                  onClick={() =>
-                    openAudit({
-                      title: 'Lender capacity range',
-                      lines: cmp.results.map((r) => ({ label: r.lender, value: r.maxNewLending, format: 'currency' as const })),
-                      ruleSetIds: cmp.results.map((r) => r.policyId),
-                    })
-                  }
-                >
-                  explain this difference
-                </button>
-                .
+              <p className="pt-1 text-[11px] leading-relaxed text-slate-500b">
+                Bank profiles extracted from each bank's own servicing calculator (versioned; hidden parameter sheets included). Test rates and
+                benchmark expenses move with the economy — Westpac's benchmark table is explicitly CPI-indexed — so every profile carries its
+                release date and requires adviser confirmation before reliance.
               </p>
             </div>
           ) : null}

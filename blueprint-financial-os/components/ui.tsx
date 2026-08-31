@@ -179,6 +179,41 @@ export function InfoTip({ children, tip }: { children: ReactNode; tip: string })
   );
 }
 
+/**
+ * Bank identification chip — a wordmark-style badge in the bank's brand
+ * colour. Deliberately text-based (nominative identification), not copied
+ * logo artwork.
+ */
+export function BankMark({
+  mark,
+  color,
+  textColor = '#ffffff',
+  muted = false,
+  size = 'md',
+}: {
+  mark: string;
+  color: string;
+  textColor?: string;
+  muted?: boolean;
+  size?: 'sm' | 'md';
+}) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-md font-display font-bold tracking-tight ${
+        size === 'sm' ? 'h-5 px-1.5 text-[10px]' : 'h-6 px-2 text-[11px]'
+      }`}
+      style={{
+        backgroundColor: muted ? '#e3e8ef' : color,
+        color: muted ? '#5a6b82' : textColor,
+        fontStyle: 'italic',
+        letterSpacing: '-0.02em',
+      }}
+    >
+      {mark}
+    </span>
+  );
+}
+
 export function Pill({ children, tone = 'teal' }: { children: ReactNode; tone?: 'teal' | 'amber' | 'rose' | 'slate' | 'green' }) {
   const tones = {
     teal: 'bg-aqua-100 text-teal-500 border-teal-300/50',
