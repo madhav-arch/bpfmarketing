@@ -150,3 +150,51 @@ describe('insights + summary', () => {
     expect(summary).toContain(`$${Math.round(selected.servicing.umi).toLocaleString()}`);
   });
 });
+
+describe('sell-home-and-buy (compound adviser prompt)', () => {
+  it('parses "sell my house … and buy another home for $1.6m"', () => {
+    const res = localParser.parse(
+      'what would happen if I was to sell my house (account for lawyer, agent fees) and buy another home for $1.6m and hold the investment?',
+      { client: demoHomeowner },
+    );
+    const kinds = res.changes.map((c) => c.change.kind);
+    expect(kinds).toContain('sellProperty');
+    expect(kinds).toContain('buyProperty');
+    const sell = res.changes.find((c) => c.change.kind === 'sellProperty')!.change as { propertyId: string };
+    expect(sell.propertyId).toBe('home'); // the owner-occupied one, not the rental
+  });
+
+  it('explains the missing purchase price instead of failing silently', () => {
+    const res = localParser.parse(
+      'what would happen if I was to sell my house (account for lawyer, agent fees) and buy another one and hold the investment?',
+      { client: demoHomeowner },
+    );
+    expect(res.changes.some((c) => c.change.kind === 'sellProperty')).toBe(true);
+    expect(res.commentary).toMatch(/price/i);
+  });
+
+  it('sale clears home debt, deducts agent+legal, keeps the rental, funds the purchase', () => {
+    const state = applyScenario(demoHomeowner, [
+      { kind: 'sellProperty', propertyId: 'home' },
+      { kind: 'buyProperty', price: 1_600_000, ownerOccupied: true },
+    ]);
+    // home gone, rental retained with its loan (62% LVR — under the 70% cap)
+    expect(state.client.properties.find((p) => p.id === 'home')).toBeUndefined();
+    expect(state.client.properties.find((p) => p.id === 'rental')).toBeTruthy();
+    expect(state.client.mortgages.find((m) => m.id === 'loan-rental')!.balance).toBe(447_119);
+    // proceeds: 1,470,000 − 3% agent (44,100) − 1,500 legal − 529,587 home loans = 894,813
+    const buyLoan = state.client.mortgages.find((m) => m.lender === 'New lending')!;
+    expect(buyLoan.balance).toBeCloseTo(1_600_000 - 894_813, 0);
+    const result = computeAll(state, ctx);
+    expect(result.equity.properties).toHaveLength(2);
+  });
+
+  it('repays lending above the 70% LVR cap on a retained investment from proceeds', () => {
+    const over = structuredClone(demoHomeowner);
+    over.mortgages.find((m) => m.id === 'loan-rental')!.balance = 560_000; // 78% LVR on $720k
+    const state = applyScenario(over, [{ kind: 'sellProperty', propertyId: 'home' }]);
+    const rentalLoan = state.client.mortgages.find((m) => m.id === 'loan-rental')!;
+    expect(rentalLoan.balance).toBeCloseTo(720_000 * 0.7, 0); // paid down to the cap
+    expect(state.notes.some((n) => n.includes('LVR cap'))).toBe(true);
+  });
+});

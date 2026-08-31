@@ -20,6 +20,14 @@ export interface ScenarioState {
   notes: string[];
 }
 
+// Sale-cost and LVR-cap assumptions used when restructuring on a sale.
+// These mirror the Blueprint modelling policy (lib/rules/lenderPolicies.ts);
+// kept as named constants here so the scenario layer stays context-free.
+const SALE_AGENT_FEE_RATE = 0.03;
+const SALE_LEGAL_FEE = 1500;
+const MAX_LVR_OWNER_OCCUPIED = 0.8;
+const MAX_LVR_INVESTMENT = 0.7;
+
 let uid = 0;
 const nextId = (p: string) => `${p}-scn-${++uid}`;
 
@@ -106,13 +114,39 @@ export function applyScenario(baseline: Client, changes: ScenarioChange[]): Scen
           const prop = client.properties[idx];
           const value = c.price ?? prop.valuations.find((v) => v.id === prop.activeValuationId)?.value ?? 0;
           const debt = client.mortgages.filter((m) => m.propertyId === prop.id).reduce((s, m) => s + m.balance, 0);
-          const agentFees = value * 0.03;
-          state.soldPropertyProceeds += Math.max(0, value - agentFees - debt);
+          const agentFees = value * SALE_AGENT_FEE_RATE;
+          const legalFee = SALE_LEGAL_FEE;
+          let proceeds = Math.max(0, value - agentFees - legalFee - debt);
           state.notes.push(
-            `Sold ${prop.nickname} for $${Math.round(value).toLocaleString()} — net proceeds ≈ $${Math.round(value - agentFees - debt).toLocaleString()} after ~3% selling costs and debt clearance.`,
+            `Sold ${prop.nickname} for $${Math.round(value).toLocaleString()}: less agent ~${Math.round(SALE_AGENT_FEE_RATE * 100)}% ($${Math.round(agentFees).toLocaleString()}), legal $${legalFee.toLocaleString()}, and $${Math.round(debt).toLocaleString()} debt cleared → net proceeds ≈ $${Math.round(proceeds).toLocaleString()}.`,
           );
           client.properties.splice(idx, 1);
           client.mortgages = client.mortgages.filter((m) => m.propertyId !== prop.id);
+          // Lender check at settlement: remaining properties must sit inside
+          // LVR caps once this security is released. Any excess lending is
+          // repaid from proceeds (pay back min(current lending, LVR limit)).
+          for (const kept of client.properties) {
+            const keptValue = kept.valuations.find((v) => v.id === kept.activeValuationId)?.value ?? 0;
+            const cap = kept.use === 'owner-occupied' ? MAX_LVR_OWNER_OCCUPIED : MAX_LVR_INVESTMENT;
+            const keptLoans = client.mortgages.filter((m) => m.propertyId === kept.id);
+            const keptDebt = keptLoans.reduce((s, m) => s + m.balance, 0);
+            let excess = Math.max(0, keptDebt - keptValue * cap);
+            if (excess > 0.01) {
+              const payDown = Math.min(excess, proceeds);
+              proceeds -= payDown;
+              let remaining = payDown;
+              for (const loan of keptLoans.sort((a, b) => b.balance - a.balance)) {
+                const pay = Math.min(remaining, loan.balance);
+                loan.balance -= pay;
+                remaining -= pay;
+                if (remaining <= 0) break;
+              }
+              state.notes.push(
+                `${kept.nickname} sits above the ${Math.round(cap * 100)}% LVR cap once the sold security is released — $${Math.round(payDown).toLocaleString()} of proceeds repaid to bring it inside the limit${payDown < excess ? ' (proceeds insufficient to fully clear the excess)' : ''}.`,
+              );
+            }
+          }
+          state.soldPropertyProceeds += proceeds;
         }
         break;
       }

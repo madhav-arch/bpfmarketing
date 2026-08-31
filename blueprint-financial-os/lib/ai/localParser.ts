@@ -139,11 +139,12 @@ const RULES: Rule[] = [
     },
   },
   {
-    pattern: new RegExp(String.raw`sell\s+(?:the\s+)?(rental|investment|first\s+property|home)`, 'i'),
+    pattern: /sell\s+(?:the\s+|my\s+|our\s+)?(rental|investment|first\s+property|(?:family\s+)?home|house|place)\b/i,
     build: (m, ctx) => {
-      const wantHome = /home/i.test(m[1]);
+      const wantHome = /home|house|place/i.test(m[1]);
       const prop = ctx.client.properties.find((p) => (wantHome ? p.use === 'owner-occupied' : p.use === 'investment'));
       if (!prop) return null;
+      // No price given → sell at the active valuation (noted by the engine).
       return [{ kind: 'sellProperty', propertyId: prop.id }];
     },
   },
@@ -158,6 +159,12 @@ const RULES: Rule[] = [
   },
   {
     pattern: new RegExp(String.raw`(?:buy|purchase)\s+(?:an?\s+)?(?:owner[-\s]occupied|new)\s+home\s+(?:for|at)\s+${NUM}`, 'i'),
+    build: (m) => [{ kind: 'buyProperty', price: parsePrice(m[1], m[2]), ownerOccupied: true }],
+  },
+  {
+    // "buy another one/house/home/place for $1.6m" — owner-occupied unless
+    // the wording says rental/investment (that case is handled above).
+    pattern: new RegExp(String.raw`(?:buy|purchase)\s+(?:another|the\s+next|a)\s+(?:one|house|home|place)\s+(?:for|at)\s+${NUM}`, 'i'),
     build: (m) => [{ kind: 'buyProperty', price: parsePrice(m[1], m[2]), ownerOccupied: true }],
   },
   // --- Interest only --------------------------------------------------------
@@ -286,13 +293,30 @@ export class LocalParser implements ScenarioCopilot {
       return true;
     });
 
+    // Deterministic engine, deterministic honesty: if a purchase was mentioned
+    // without a price, say exactly what is missing rather than guessing one.
+    const hints: string[] = [];
+    const mentionsBuy = /\b(buy|purchase)\b/i.test(utterance);
+    const parsedBuy = deduped.some((c) => c.change.kind === 'buyProperty' || c.change.kind === 'setPurchasePrice');
+    if (mentionsBuy && !parsedBuy) {
+      hints.push(
+        'To model the purchase side I need a price — add e.g. “… and buy another home for $1.5m” (serviceability, LVR limits and net proceeds are then recalculated automatically).',
+      );
+    }
+    if (deduped.some((c) => c.change.kind === 'sellProperty')) {
+      hints.push(
+        'Sale modelling deducts ~3% agent fees + legal costs, clears the debt on the sold property, and repays any lending above LVR caps (70% investment / 80% owner-occupied) on retained properties before counting net proceeds.',
+      );
+    }
+
     return {
       changes: deduped,
       unrecognised: deduped.length === 0 ? utterance : undefined,
       commentary:
         deduped.length === 0
-          ? 'I couldn’t map that to a modelling change. Try e.g. “Increase repayments by $500 a fortnight”, “What if they buy for $850k”, “Add a boarder paying $250 per week”.'
-          : undefined,
+          ? hints[0] ??
+            'I couldn’t map that to a modelling change. Try one instruction per phrase, e.g. “Sell my house and buy another home for $1.5m”, “Increase repayments by $500 a fortnight”, “Add a boarder paying $250 per week”.'
+          : hints.join(' ') || undefined,
     };
   }
 }
