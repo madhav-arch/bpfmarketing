@@ -16,6 +16,7 @@ import { GoalsSection, TodaySection, BankViewSection, CapacitySection } from './
 import { OptionsSection } from './OptionsSection';
 import { FutureSection, ProtectionSection } from './PlanningSections';
 import { BlueprintSection } from './BlueprintSection';
+import { useFeed } from './LiveDataPanel';
 import type { SectionProps } from './types';
 
 interface Scenario {
@@ -140,6 +141,8 @@ export default function Workspace() {
     setActiveScenarioId(id);
   };
 
+  const feed = useFeed(baselineClient);
+
   const sectionProps: SectionProps = {
     client: activeState.client,
     baselineClient,
@@ -149,6 +152,7 @@ export default function Workspace() {
     openAudit: setAudit,
     addChanges,
     ctx,
+    feed,
   };
 
   const s = activeResult.snapshot;

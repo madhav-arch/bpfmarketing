@@ -5,6 +5,7 @@ import { BankWaterfall, LenderCapacityChart, RecognitionBars } from '@/component
 import { money, moneyShort, pct } from '@/lib/format';
 import type { SectionProps } from './types';
 import type { GoalKind } from '@/lib/domain/types';
+import { LiveDataPanel } from './LiveDataPanel';
 
 const GOAL_ICONS: Partial<Record<GoalKind, string>> = {
   'buy-first-home': '⌂',
@@ -65,7 +66,7 @@ export function GoalsSection({ client }: SectionProps) {
 // ---------------------------------------------------------------------------
 // 02 — Where you are today
 
-export function TodaySection({ client, result, openAudit, presentation }: SectionProps) {
+export function TodaySection({ client, result, openAudit, presentation, feed, addChanges }: SectionProps) {
   const s = result.snapshot;
   const isFhb = client.clientType === 'fhb';
   const isInvestor = client.clientType === 'investor';
@@ -182,6 +183,8 @@ export function TodaySection({ client, result, openAudit, presentation }: Sectio
           </div>
         </div>
       ) : null}
+
+      <LiveDataPanel client={client} feed={feed} presentation={presentation} addChanges={addChanges} />
     </section>
   );
 }
@@ -189,7 +192,7 @@ export function TodaySection({ client, result, openAudit, presentation }: Sectio
 // ---------------------------------------------------------------------------
 // 03 — How the bank sees you
 
-export function BankViewSection({ result, openAudit, presentation, ctx }: SectionProps) {
+export function BankViewSection({ result, openAudit, presentation, ctx, feed }: SectionProps) {
   const sv = result.servicing;
   const scaledLines = sv.incomeLines.filter((l) => l.scaling < 1);
 
@@ -282,6 +285,14 @@ export function BankViewSection({ result, openAudit, presentation, ctx }: Sectio
               <span className="num">{money(sv.livingExpenses.totalMonthly)}/mo</span>
             </div>
           </div>
+          <p className="mt-3 rounded-lg bg-aqua-100 px-3.5 py-2.5 text-[12px] leading-relaxed text-navy-800">
+            The statements say the household actually spends{' '}
+            <strong className="num">{money(feed.analysis.totalSpendMonthly)}/mo</strong> on lifestyle (
+            {feed.isLive ? 'live Akahu feed' : 'demo feed'}, {feed.analysis.monthsCovered} months) —{' '}
+            {feed.analysis.totalSpendMonthly > sv.livingExpenses.totalMonthly
+              ? 'above the benchmark, so the benchmark won’t be what the assessor uses; statements decide.'
+              : 'inside the benchmark, which is what the assessor will apply.'}
+          </p>
         </Card>
 
         <Card className="p-6">

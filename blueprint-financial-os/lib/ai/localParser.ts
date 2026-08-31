@@ -167,6 +167,34 @@ const RULES: Rule[] = [
     pattern: new RegExp(String.raw`(?:buy|purchase)\s+(?:another|the\s+next|a)\s+(?:one|house|home|place)\s+(?:for|at)\s+${NUM}`, 'i'),
     build: (m) => [{ kind: 'buyProperty', price: parsePrice(m[1], m[2]), ownerOccupied: true }],
   },
+  // --- Valuations (QV E-Valuer etc. — recorded with provenance) -------------
+  {
+    pattern: new RegExp(String.raw`(?:qv|e-?valuer)\s+(?:says|values?|puts|estimates?|has)\s+(?:the\s+)?(house|home|rental|investment|property)?\s*(?:at|is worth|worth)?\s*${NUM}`, 'i'),
+    build: (m, ctx) => {
+      const wantRental = /rental|investment/i.test(m[1] ?? '');
+      const prop = ctx.client.properties.find((p) => (wantRental ? p.use === 'investment' : p.use === 'owner-occupied')) ?? ctx.client.properties[0];
+      if (!prop) return null;
+      return [{ kind: 'addValuation', propertyId: prop.id, value: parsePrice(m[2], m[3]), sourceName: 'QV E-Valuer' }];
+    },
+  },
+  {
+    pattern: new RegExp(String.raw`(?:add|record|use)\s+a?\s*(?:qv\s+)?valuation\s+of\s+${NUM}(?:\s+(?:for|on)\s+(?:the\s+)?(house|home|rental|investment))?`, 'i'),
+    build: (m, ctx) => {
+      const wantRental = /rental|investment/i.test(m[3] ?? '');
+      const prop = ctx.client.properties.find((p) => (wantRental ? p.use === 'investment' : p.use === 'owner-occupied')) ?? ctx.client.properties[0];
+      if (!prop) return null;
+      return [{ kind: 'addValuation', propertyId: prop.id, value: parsePrice(m[1], m[2]), sourceName: /qv/i.test(m[0]) ? 'QV E-Valuer' : 'Adviser-entered valuation' }];
+    },
+  },
+  {
+    pattern: new RegExp(String.raw`value\s+the\s+(house|home|rental|investment)\s+at\s+${NUM}`, 'i'),
+    build: (m, ctx) => {
+      const wantRental = /rental|investment/i.test(m[1]);
+      const prop = ctx.client.properties.find((p) => (wantRental ? p.use === 'investment' : p.use === 'owner-occupied')) ?? ctx.client.properties[0];
+      if (!prop) return null;
+      return [{ kind: 'addValuation', propertyId: prop.id, value: parsePrice(m[2], m[3]), sourceName: 'Adviser-entered valuation' }];
+    },
+  },
   // --- Interest only --------------------------------------------------------
   {
     pattern: /(?:make|switch|put)\s+(?:the\s+)?(?:next\s+loan|new\s+loan|loans?|it|everything)\s+(?:to\s+)?interest[-\s]only/i,

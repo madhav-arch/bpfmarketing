@@ -229,6 +229,29 @@ export function applyScenario(baseline: Client, changes: ScenarioChange[]): Scen
         client.otherDebts = client.otherDebts.filter((d) => d.kind !== 'credit-card' && d.kind !== 'store-card');
         break;
       }
+      case 'addValuation': {
+        const target =
+          (c.propertyId && client.properties.find((p) => p.id === c.propertyId)) ||
+          client.properties.find((p) => p.use === 'owner-occupied') ||
+          client.properties[0];
+        if (target) {
+          const vid = nextId('val');
+          target.valuations.push({
+            id: vid,
+            value: c.value,
+            sourceType: 'avm',
+            sourceName: c.sourceName ?? 'Adviser-entered valuation',
+            observedAt: new Date().toISOString().slice(0, 10),
+            confidence: 'medium',
+            note: 'Recorded during this session — verify against the source report.',
+          });
+          if (c.useAsActive !== false) target.activeValuationId = vid;
+          state.notes.push(
+            `${c.sourceName ?? 'Valuation'} of $${Math.round(c.value).toLocaleString()} recorded for ${target.nickname}${c.useAsActive !== false ? ' and used for modelling' : ''}.`,
+          );
+        }
+        break;
+      }
       case 'lumpSumRepayment': {
         state.lumpSumRepayment += c.amount;
         // applied against the largest P&I loan

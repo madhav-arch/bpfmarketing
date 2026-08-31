@@ -26,7 +26,14 @@ export type ScenarioChange =
   | { kind: 'setHorizonAge'; age: number }
   | { kind: 'addIncome'; label: string; netAnnual: number }
   | { kind: 'closeCreditCards' }
-  | { kind: 'lumpSumRepayment'; amount: number };
+  | { kind: 'lumpSumRepayment'; amount: number }
+  | {
+      kind: 'addValuation';
+      propertyId?: string;
+      value: number;
+      sourceName?: string; // e.g. "QV E-Valuer", "Registered valuation"
+      useAsActive?: boolean;
+    };
 
 const frequency = z.enum(['weekly', 'fortnightly', 'monthly', 'annual']);
 
@@ -71,6 +78,13 @@ export const scenarioChangeSchema: z.ZodType<ScenarioChange> = z.discriminatedUn
   z.object({ kind: z.literal('addIncome'), label: z.string(), netAnnual: z.number() }),
   z.object({ kind: z.literal('closeCreditCards') }),
   z.object({ kind: z.literal('lumpSumRepayment'), amount: z.number().positive() }),
+  z.object({
+    kind: z.literal('addValuation'),
+    propertyId: z.string().optional(),
+    value: z.number().positive(),
+    sourceName: z.string().optional(),
+    useAsActive: z.boolean().optional(),
+  }),
 ]);
 
 /** Human-readable chip label for a proposed change. */
@@ -99,5 +113,6 @@ export function describeChange(c: ScenarioChange): string {
     case 'addIncome': return `${c.label} +${fmt(c.netAnnual)}/yr net`;
     case 'closeCreditCards': return 'Close credit cards';
     case 'lumpSumRepayment': return `Lump sum ${fmt(c.amount)} onto mortgage`;
+    case 'addValuation': return `${c.sourceName ?? 'Valuation'} → ${fmt(c.value)}`;
   }
 }

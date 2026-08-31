@@ -42,3 +42,6 @@ next-env.d.ts
 
 # single-file bundle output
 /dist/
+
+# live bank-feed snapshots — real client data, never commit
+/public/feed/
