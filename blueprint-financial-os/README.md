@@ -53,3 +53,17 @@ All demo clients in `lib/data` are anonymised composites derived from the *struc
 client files — no real names, addresses, contact details or identifying information appear
 anywhere in this repository. Everything on screen is illustrative modelling, not financial
 advice.
+
+## Testing with your own Akahu data
+
+1. `cp .env.example .env.local` and add your Akahu personal-app tokens
+   (create one at https://developers.akahu.nz after connecting banks at my.akahu.nz).
+2. `npm run sync:akahu` — pulls accounts + 3 months of transactions,
+   normalised and PII-redacted, into `public/feed/live.json` (git-ignored).
+3. `npm run dev`, then click **＋ New client** in the header. The minimal
+   intake asks only: client type, names, household basics, card limits,
+   what each property is worth (key the CoreLogic figure), and age for
+   first-home buyers only. Income, expenses and loan balances/rates/
+   repayments come from the feed; servicing still stress-tests at 7%.
+4. Section 02 shows the benchmark-vs-actual spending comparison with
+   abnormality flags — the assessor's-eye view of the statements.

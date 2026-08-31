@@ -240,6 +240,114 @@ export function analyseFeed(snapshot: FeedSnapshot, client: Client): FeedAnalysi
   };
 }
 
+// ---------------------------------------------------------------------------
+// Benchmark vs actual: roll actual spending up into the lender's servicing
+// buckets and flag abnormalities. This is the heart of the live-data story —
+// the bank benchmarks a minimum; the statements say what really happens.
+
+import type { LenderPolicy } from '../rules/types';
+
+export interface BenchmarkRow {
+  bucket: string;
+  benchmarkMonthly: number;
+  actualMonthly: number;
+  delta: number; // actual − benchmark
+  categories: SpendCategory[];
+  flag?: { severity: 'info' | 'attention'; message: string };
+}
+
+export interface BenchmarkComparison {
+  rows: BenchmarkRow[];
+  benchmarkTotal: number;
+  actualTotal: number;
+  assessorView: string;
+}
+
+const BASELINE_CATEGORIES: SpendCategory[] = [
+  'Food & groceries',
+  'Eating out & takeaways',
+  'Utilities & phone',
+  'Health & personal care',
+  'Entertainment & lifestyle',
+  'Household & garden',
+  'Subscriptions',
+  'Other',
+];
+const VEHICLE_CATEGORIES: SpendCategory[] = ['Transport & fuel'];
+const COMMITMENT_CATEGORIES: SpendCategory[] = ['Insurance', 'Rates', 'Childcare & education'];
+
+export function benchmarkComparison(
+  analysis: FeedAnalysis,
+  client: Client,
+  policy: LenderPolicy,
+): BenchmarkComparison {
+  const spend = (cats: SpendCategory[]) =>
+    analysis.spendByCategory.filter((c) => cats.includes(c.category)).reduce((s, c) => s + c.monthlyAverage, 0);
+
+  const bench = policy.expenseBenchmark;
+  const baselineBenchmark = client.household.adults === 2 ? bench.couple : bench.single;
+  const dependantsBenchmark = bench.perDependant * client.household.dependants;
+  const vehiclesBenchmark = bench.perVehicle * client.household.vehicles;
+  // dependant costs are spread through groceries etc. in real statements, so
+  // baseline + dependants are compared as one bucket
+  const baselineActual = spend(BASELINE_CATEGORIES);
+  const vehiclesActual = spend(VEHICLE_CATEGORIES);
+  const commitmentsActual = spend(COMMITMENT_CATEGORIES);
+  const declaredCommitments = client.expenses.fixedCommitmentsMonthly.reduce((s, i) => s + i.amount, 0);
+
+  const rows: BenchmarkRow[] = [
+    {
+      bucket: `Household living (baseline${client.household.dependants ? ' + dependants' : ''})`,
+      benchmarkMonthly: baselineBenchmark + dependantsBenchmark,
+      actualMonthly: baselineActual,
+      delta: baselineActual - (baselineBenchmark + dependantsBenchmark),
+      categories: BASELINE_CATEGORIES,
+    },
+    {
+      bucket: `Vehicles × ${client.household.vehicles}`,
+      benchmarkMonthly: vehiclesBenchmark,
+      actualMonthly: vehiclesActual,
+      delta: vehiclesActual - vehiclesBenchmark,
+      categories: VEHICLE_CATEGORIES,
+    },
+    {
+      bucket: 'Fixed commitments (insurance, rates, childcare)',
+      benchmarkMonthly: declaredCommitments || commitmentsActual,
+      actualMonthly: commitmentsActual,
+      delta: commitmentsActual - (declaredCommitments || commitmentsActual),
+      categories: COMMITMENT_CATEGORIES,
+    },
+  ];
+
+  for (const row of rows) {
+    if (row.benchmarkMonthly <= 0) continue;
+    const ratio = row.actualMonthly / row.benchmarkMonthly;
+    if (ratio > 1.3 && row.delta > 250) {
+      row.flag = {
+        severity: 'attention',
+        message: `Actual runs ${Math.round((ratio - 1) * 100)}% (+$${Math.round(row.delta).toLocaleString()}/mo) above the benchmark — an assessor will use the statements, not the benchmark. Worth a conversation before any application.`,
+      };
+    } else if (ratio < 0.6 && row.benchmarkMonthly - row.actualMonthly > 250) {
+      row.flag = {
+        severity: 'info',
+        message: `Actual runs well below the benchmark — the lender will still assess at the benchmark minimum, but the real surplus is stronger than the test implies.`,
+      };
+    }
+  }
+
+  const benchmarkTotal = rows.reduce((s, r) => s + r.benchmarkMonthly, 0);
+  const actualTotal = rows.reduce((s, r) => s + r.actualMonthly, 0);
+  return {
+    rows,
+    benchmarkTotal,
+    actualTotal,
+    assessorView:
+      actualTotal > benchmarkTotal
+        ? 'Statements exceed the benchmark — the assessor will use the higher, actual figure.'
+        : 'Statements sit inside the benchmark — the assessor applies the benchmark minimum.',
+  };
+}
+
 /** Actual repayments seen in the feed vs recorded loan repayments. */
 export function repaymentCrossCheck(analysis: FeedAnalysis, client: Client): { feedMonthly: number; recordedMonthly: number } {
   return {

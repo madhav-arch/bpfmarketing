@@ -5,7 +5,8 @@ import type { Client } from '@/lib/domain/types';
 import type { FeedSnapshot } from '@/lib/data-sources/types';
 import { qvValuationProvider } from '@/lib/data-sources/types';
 import { demoFeedFor } from '@/lib/data-sources/demoFeed';
-import { analyseFeed, repaymentCrossCheck, type FeedAnalysis } from '@/lib/calculators/cashflow';
+import { analyseFeed, benchmarkComparison, repaymentCrossCheck, type FeedAnalysis } from '@/lib/calculators/cashflow';
+import type { LenderPolicy } from '@/lib/rules/types';
 import { Card, Pill } from '@/components/ui';
 import { money, moneyShort } from '@/lib/format';
 import type { ScenarioChange } from '@/lib/scenarios/changes';
@@ -42,14 +43,17 @@ export function LiveDataPanel({
   feed,
   presentation,
   addChanges,
+  policy,
 }: {
   client: Client;
   feed: FeedState;
   presentation: boolean;
   addChanges: (changes: ScenarioChange[], name?: string) => void;
+  policy: LenderPolicy;
 }) {
   const a = feed.analysis;
   const cross = repaymentCrossCheck(a, client);
+  const bench = benchmarkComparison(a, client, policy);
   const [valAmount, setValAmount] = useState('');
   const [valSource, setValSource] = useState('QV E-Valuer');
   const [valProperty, setValProperty] = useState(client.properties[0]?.id ?? '');
@@ -70,6 +74,55 @@ export function LiveDataPanel({
           </span>
         </div>
       </div>
+
+      {/* Benchmark vs actual — the assessor's view */}
+      <Card className="mb-4 p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h4 className="text-[13.5px] font-semibold text-ink">Bank benchmark vs what the statements say</h4>
+          <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${bench.actualTotal > bench.benchmarkTotal ? 'bg-amber-50 text-amber-600b' : 'bg-emerald-50 text-green-600b'}`}>
+            {bench.assessorView}
+          </span>
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-[12.5px]">
+            <thead>
+              <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-slate-500b">
+                <th className="pb-2 font-medium">Servicing bucket</th>
+                <th className="pb-2 text-right font-medium">Bank benchmark</th>
+                <th className="pb-2 text-right font-medium">Actual (feed)</th>
+                <th className="pb-2 text-right font-medium">Variance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bench.rows.map((r) => (
+                <tr key={r.bucket} className="border-b border-line/60 align-top">
+                  <td className="py-2 pr-3">
+                    <div className="font-medium text-ink">{r.bucket}</div>
+                    {r.flag && !presentation ? (
+                      <div className={`mt-1 rounded px-2 py-1 text-[11px] leading-snug ${r.flag.severity === 'attention' ? 'bg-amber-50 text-amber-900' : 'bg-mist text-slate-500b'}`}>
+                        {r.flag.message}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="num py-2 text-right">{money(r.benchmarkMonthly)}/mo</td>
+                  <td className="num py-2 text-right font-semibold text-ink">{money(r.actualMonthly)}/mo</td>
+                  <td className={`num py-2 text-right font-semibold ${r.delta > 100 ? 'text-rose-600b' : r.delta < -100 ? 'text-green-600b' : 'text-slate-400'}`}>
+                    {money(r.delta, { sign: true })}
+                  </td>
+                </tr>
+              ))}
+              <tr className="font-semibold">
+                <td className="py-2 pr-3">Total</td>
+                <td className="num py-2 text-right">{money(bench.benchmarkTotal)}/mo</td>
+                <td className="num py-2 text-right">{money(bench.actualTotal)}/mo</td>
+                <td className={`num py-2 text-right ${bench.actualTotal - bench.benchmarkTotal > 0 ? 'text-rose-600b' : 'text-green-600b'}`}>
+                  {money(bench.actualTotal - bench.benchmarkTotal, { sign: true })}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Actual vs declared spending */}

@@ -134,3 +134,95 @@ describe('valuation recording', () => {
     expect(res.changes.length).toBe(0);
   });
 });
+
+describe('minimal intake — Akahu-first fact find', () => {
+  const feed = demoFeedFor(demoHomeowner); // shaped like a real Akahu snapshot
+
+  it('grossFromNetMonthly inverts the PAYE calculation', async () => {
+    const { grossFromNetMonthly, netMonthlyFromSalary } = await import('../lib/calculators/tax');
+    const { TAX_CURRENT } = await import('../lib/rules/taxTables');
+    const gross = grossFromNetMonthly(6_000, 0.03, TAX_CURRENT);
+    expect(netMonthlyFromSalary(gross, 0.03, TAX_CURRENT).netMonthly).toBeCloseTo(6_000, 0);
+  });
+
+  it('builds a full client from the minimal form + feed', async () => {
+    const { buildClientFromIntake } = await import('../lib/intake/buildClient');
+    const { TAX_CURRENT } = await import('../lib/rules/taxTables');
+    const built = buildClientFromIntake(
+      {
+        label: 'Test Intake',
+        clientType: 'homeowner',
+        applicantNames: ['Kate', 'Logan'],
+        dependants: 2,
+        vehicles: 2,
+        creditCardLimits: 10_000,
+        properties: [
+          { nickname: 'Home', ownerEstimate: 1_450_000, use: 'owner-occupied' },
+          { nickname: 'Rental', ownerEstimate: 700_000, use: 'investment', rentPerWeek: 560 },
+        ],
+      },
+      feed,
+      TAX_CURRENT,
+    );
+    const c = built.client;
+    // mortgages come from the feed with their real rates/repayments
+    expect(c.mortgages.length).toBe(feed.accounts.filter((a) => a.type === 'mortgage' || a.type === 'loan').length);
+    expect(c.mortgages[0].rate).toBeCloseTo(demoHomeowner.mortgages[0].rate, 4);
+    expect(c.mortgages[0].repayment.amount).toBeCloseTo(demoHomeowner.mortgages[0].repayment.amount, 1);
+    // income grossed up from detected credits — no income questions asked
+    const totalGross = c.applicants.reduce((s, a) => s + a.incomes.reduce((t, i) => t + i.grossAnnual, 0), 0);
+    expect(totalGross).toBeGreaterThan(120_000);
+    // no declared expenses — the feed is the source
+    expect(c.expenses.declaredMonthly.length).toBe(0);
+    // age NOT asked for a homeowner → default with an assumption note
+    expect(c.applicants[0].age).toBe(40);
+    expect(built.assumptions.some((a) => /age/i.test(a))).toBe(true);
+    // valuation stored as owner estimate with provenance
+    expect(c.properties[0].valuations[0].sourceType).toBe('adviser-estimate');
+    // savings pulled from feed balances
+    expect(c.cashSavings.sourceType).toBe('statement');
+  });
+
+  it('servicing on an intake client still stress-tests at 7%', async () => {
+    const { buildClientFromIntake } = await import('../lib/intake/buildClient');
+    const { TAX_CURRENT } = await import('../lib/rules/taxTables');
+    const { client } = buildClientFromIntake(
+      { label: 'Stress', clientType: 'homeowner', applicantNames: ['A', 'B'], dependants: 0, vehicles: 1, creditCardLimits: 0, properties: [{ nickname: 'Home', ownerEstimate: 1_200_000, use: 'owner-occupied' }] },
+      feed,
+      TAX_CURRENT,
+    );
+    const result = computeAll(applyScenario(client, []), DEFAULT_RULE_CONTEXT);
+    const stressed = result.servicing.debtServicing.items.find((i) => i.label.includes('stress-tested'));
+    expect(stressed).toBeTruthy();
+    expect(stressed!.note).toContain('7.00%');
+  });
+
+  it('asks for age when the client is a first-home buyer', async () => {
+    const { buildClientFromIntake } = await import('../lib/intake/buildClient');
+    const { TAX_CURRENT } = await import('../lib/rules/taxTables');
+    const { client, assumptions } = buildClientFromIntake(
+      { label: 'FHB', clientType: 'fhb', applicantNames: ['A'], dependants: 0, vehicles: 1, creditCardLimits: 5_000, properties: [], ages: [29], kiwiSaverTotal: 40_000, savingsForDeposit: 25_000, targetPrice: 800_000 },
+      feed,
+      TAX_CURRENT,
+    );
+    expect(client.applicants[0].age).toBe(29);
+    expect(assumptions.every((a) => !/age \d+ assumed|assume age/i.test(a))).toBe(true);
+    expect(client.targetPurchase!.depositSources.kiwiSaver).toBe(40_000);
+  });
+});
+
+describe('benchmark vs actual comparison', () => {
+  it('rolls actual spending into servicing buckets and flags abnormalities', async () => {
+    const { benchmarkComparison } = await import('../lib/calculators/cashflow');
+    const feed = demoFeedFor(demoHomeowner);
+    const analysis = analyseFeed(feed, demoHomeowner);
+    const cmp = benchmarkComparison(analysis, demoHomeowner, DEFAULT_RULE_CONTEXT.policy);
+    expect(cmp.rows.length).toBe(3);
+    expect(cmp.rows[0].benchmarkMonthly).toBe(1850 + 2 * 400); // couple + 2 dependants
+    expect(cmp.rows[0].actualMonthly).toBeGreaterThan(1_500);
+    expect(cmp.benchmarkTotal).toBeGreaterThan(0);
+    expect(cmp.assessorView.length).toBeGreaterThan(10);
+    // demo homeowner household actually outspends the baseline benchmark → flagged
+    expect(cmp.rows.some((r) => r.flag)).toBe(true);
+  });
+});

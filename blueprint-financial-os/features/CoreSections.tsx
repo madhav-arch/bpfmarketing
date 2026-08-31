@@ -66,7 +66,7 @@ export function GoalsSection({ client }: SectionProps) {
 // ---------------------------------------------------------------------------
 // 02 — Where you are today
 
-export function TodaySection({ client, result, openAudit, presentation, feed, addChanges }: SectionProps) {
+export function TodaySection({ client, result, openAudit, presentation, feed, addChanges, ctx }: SectionProps) {
   const s = result.snapshot;
   const isFhb = client.clientType === 'fhb';
   const isInvestor = client.clientType === 'investor';
@@ -184,7 +184,7 @@ export function TodaySection({ client, result, openAudit, presentation, feed, ad
         </div>
       ) : null}
 
-      <LiveDataPanel client={client} feed={feed} presentation={presentation} addChanges={addChanges} />
+      <LiveDataPanel client={client} feed={feed} presentation={presentation} addChanges={addChanges} policy={ctx.policy} />
     </section>
   );
 }

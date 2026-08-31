@@ -38,6 +38,29 @@ export interface NetMonthlyBreakdown {
  * (The workbook deducts KiwiSaver from gross before pay but computes PAYE on
  * full gross — reproduced as-is.)
  */
+/**
+ * Invert net→gross: find the gross annual salary whose net monthly pay (after
+ * PAYE, ACC and KiwiSaver) matches an observed bank credit. Deterministic
+ * bisection — used to gross up Akahu-detected income for servicing.
+ */
+export function grossFromNetMonthly(
+  netMonthly: number,
+  kiwiSaverRate: number,
+  table: TaxTable,
+  hasStudentLoan = false,
+): number {
+  if (netMonthly <= 0) return 0;
+  let lo = 0;
+  let hi = netMonthly * 12 * 2.5;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const net = netMonthlyFromSalary(mid, kiwiSaverRate, table, hasStudentLoan).netMonthly;
+    if (net < netMonthly) lo = mid;
+    else hi = mid;
+  }
+  return Math.round((lo + hi) / 2);
+}
+
 export function netMonthlyFromSalary(
   grossAnnual: number,
   kiwiSaverRate: number,

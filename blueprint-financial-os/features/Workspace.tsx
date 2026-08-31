@@ -17,7 +17,28 @@ import { OptionsSection } from './OptionsSection';
 import { FutureSection, ProtectionSection } from './PlanningSections';
 import { BlueprintSection } from './BlueprintSection';
 import { useFeed } from './LiveDataPanel';
+import { IntakeWizard } from './IntakeWizard';
 import type { SectionProps } from './types';
+
+const CUSTOM_CLIENTS_KEY = 'bpf-custom-clients-v1';
+
+function loadCustomClients(): { clients: Client[]; assumptions: Record<string, string[]> } {
+  try {
+    const raw = localStorage.getItem(CUSTOM_CLIENTS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* private mode / blocked storage — start fresh */
+  }
+  return { clients: [], assumptions: {} };
+}
+
+function saveCustomClients(clients: Client[], assumptions: Record<string, string[]>) {
+  try {
+    localStorage.setItem(CUSTOM_CLIENTS_KEY, JSON.stringify({ clients, assumptions }));
+  } catch {
+    /* non-fatal */
+  }
+}
 
 interface Scenario {
   id: string;
@@ -59,8 +80,21 @@ export default function Workspace() {
   const [copilotMsg, setCopilotMsg] = useState<string | null>(null);
   const scenarioCounter = useRef(0);
   const mainRef = useRef<HTMLDivElement>(null);
+  const [customClients, setCustomClients] = useState<Client[]>([]);
+  const [intakeAssumptions, setIntakeAssumptions] = useState<Record<string, string[]>>({});
+  const [showIntake, setShowIntake] = useState(false);
+  const [dismissedAssumptions, setDismissedAssumptions] = useState<Record<string, boolean>>({});
 
-  const baselineClient: Client = DEMO_CLIENTS.find((c) => c.id === clientId)!;
+  useEffect(() => {
+    const stored = loadCustomClients();
+    if (stored.clients.length) {
+      setCustomClients(stored.clients);
+      setIntakeAssumptions(stored.assumptions);
+    }
+  }, []);
+
+  const allClients = [...DEMO_CLIENTS, ...customClients];
+  const baselineClient: Client = allClients.find((c) => c.id === clientId) ?? DEMO_CLIENTS[0];
   const scenarios = scenariosByClient[clientId] ?? [];
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId);
   const activeChanges = activeScenario?.changes ?? [];
@@ -171,17 +205,41 @@ export default function Workspace() {
             </div>
           </div>
           <div className="ml-4 flex items-center gap-1 rounded-lg bg-navy-900 p-1">
-            {DEMO_CLIENTS.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setClientId(c.id)}
-                className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${
-                  c.id === clientId ? 'bg-teal-500 text-navy-950' : 'text-navy-100/70 hover:text-white'
-                }`}
-              >
-                {c.shortLabel}
-              </button>
+            {allClients.map((c) => (
+              <span key={c.id} className="group relative inline-flex">
+                <button
+                  onClick={() => {
+                    setClientId(c.id);
+                    setShowIntake(false);
+                  }}
+                  className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                    c.id === clientId && !showIntake ? 'bg-teal-500 text-navy-950' : 'text-navy-100/70 hover:text-white'
+                  }`}
+                >
+                  {c.shortLabel}
+                </button>
+                {c.id.startsWith('intake-') ? (
+                  <button
+                    title="Remove this client file"
+                    onClick={() => {
+                      const next = customClients.filter((x) => x.id !== c.id);
+                      setCustomClients(next);
+                      saveCustomClients(next, intakeAssumptions);
+                      if (clientId === c.id) setClientId(DEMO_CLIENTS[0].id);
+                    }}
+                    className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-navy-700 text-[9px] text-navy-100 group-hover:flex"
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </span>
             ))}
+            <button
+              onClick={() => setShowIntake(true)}
+              className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors ${showIntake ? 'bg-teal-500 text-navy-950' : 'text-teal-300 hover:text-white'}`}
+            >
+              ＋ New client
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -257,7 +315,26 @@ export default function Workspace() {
         ) : null}
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      {showIntake ? (
+        <main className="min-w-0 flex-1 overflow-y-auto bg-mist">
+          <IntakeWizard
+            feed={feed.snapshot}
+            isLive={feed.isLive}
+            onCancel={() => setShowIntake(false)}
+            onCreate={(client, assumptions) => {
+              const next = [...customClients.filter((c) => c.id !== client.id), client];
+              const nextAssumptions = { ...intakeAssumptions, [client.id]: assumptions };
+              setCustomClients(next);
+              setIntakeAssumptions(nextAssumptions);
+              saveCustomClients(next, nextAssumptions);
+              setShowIntake(false);
+              setClientId(client.id);
+            }}
+          />
+        </main>
+      ) : null}
+
+      <div className={`min-h-0 flex-1 ${showIntake ? 'hidden' : 'flex'}`}>
         {/* ------------------------------------------------------------- Left rail */}
         <nav className="flex w-56 shrink-0 flex-col border-r border-line bg-white">
           <div className="flex-1 overflow-y-auto py-3">
@@ -296,6 +373,28 @@ export default function Workspace() {
         {/* ------------------------------------------------------------- Main */}
         <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
           <div key={`${clientId}-${section}`} className="bp-rise mx-auto max-w-[1120px] px-8 py-8 pb-36">
+            {!presentation && intakeAssumptions[clientId]?.length && !dismissedAssumptions[clientId] ? (
+              <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-600b">
+                      Assumptions this file was built on — confirm before advice
+                    </div>
+                    <ul className="mt-1.5 space-y-1 text-[12px] leading-relaxed text-amber-900">
+                      {intakeAssumptions[clientId].map((a, i) => (
+                        <li key={i}>· {a}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <button
+                    onClick={() => setDismissedAssumptions((d) => ({ ...d, [clientId]: true }))}
+                    className="shrink-0 rounded-md border border-amber-200 px-2 py-1 text-[11px] text-amber-600b hover:bg-white"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {!presentation && section === 'goals' ? (
               <div className="mb-5 rounded-lg border border-line bg-white px-4 py-2.5 text-[12px] text-slate-500b">
                 <strong className="text-ink">{baselineClient.label}</strong> — {baselineClient.narrative}
