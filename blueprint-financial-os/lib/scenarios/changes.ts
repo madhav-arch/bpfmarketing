@@ -33,7 +33,22 @@ export type ScenarioChange =
       value: number;
       sourceName?: string; // e.g. "QV E-Valuer", "Registered valuation"
       useAsActive?: boolean;
-    };
+    }
+  // --- Iteration 2 structured actions --------------------------------------
+  | { kind: 'setIncome'; applicantIndex: number; incomeId?: string; grossAnnual: number }
+  | { kind: 'addGrossIncome'; applicantIndex?: number; incomeKind: 'salary' | 'overtime-commission' | 'self-employed' | 'other'; label: string; grossAnnual: number }
+  | { kind: 'setStressRate'; value: number }
+  | { kind: 'setLoanTerm'; years: number }
+  | { kind: 'setLowEquityMargin'; value: number }
+  | { kind: 'setOwnershipCost'; item: 'rates' | 'insurance' | 'other'; monthly: number }
+  | { kind: 'setCashback'; amount: number; retentionMonths?: number }
+  | { kind: 'kiwiSaverLumpSum'; amount: number; applicantIndex?: number; fromCash?: boolean }
+  | { kind: 'setKiwiSaverWithdrawal'; on: boolean }
+  | { kind: 'setInflation'; value: number }
+  | { kind: 'setRetirementAge'; age: number }
+  | { kind: 'setCreditCardLimit'; debtId?: string; limit: number }
+  | { kind: 'removeDebt'; debtId?: string; debtKind?: 'personal-loan' | 'credit-card' | 'store-card' | 'other' }
+  | { kind: 'setKiwiSaverReturn'; value: number };
 
 const frequency = z.enum(['weekly', 'fortnightly', 'monthly', 'annual']);
 
@@ -85,6 +100,26 @@ export const scenarioChangeSchema: z.ZodType<ScenarioChange> = z.discriminatedUn
     sourceName: z.string().optional(),
     useAsActive: z.boolean().optional(),
   }),
+  z.object({ kind: z.literal('setIncome'), applicantIndex: z.number().int().min(0), incomeId: z.string().optional(), grossAnnual: z.number().min(0) }),
+  z.object({
+    kind: z.literal('addGrossIncome'),
+    applicantIndex: z.number().int().min(0).optional(),
+    incomeKind: z.enum(['salary', 'overtime-commission', 'self-employed', 'other']),
+    label: z.string(),
+    grossAnnual: z.number().positive(),
+  }),
+  z.object({ kind: z.literal('setStressRate'), value: z.number().min(0.02).max(0.15) }),
+  z.object({ kind: z.literal('setLoanTerm'), years: z.number().min(5).max(35) }),
+  z.object({ kind: z.literal('setLowEquityMargin'), value: z.number().min(0).max(0.03) }),
+  z.object({ kind: z.literal('setOwnershipCost'), item: z.enum(['rates', 'insurance', 'other']), monthly: z.number().min(0) }),
+  z.object({ kind: z.literal('setCashback'), amount: z.number().min(0), retentionMonths: z.number().int().min(0).max(60).optional() }),
+  z.object({ kind: z.literal('kiwiSaverLumpSum'), amount: z.number().positive(), applicantIndex: z.number().int().min(0).optional(), fromCash: z.boolean().optional() }),
+  z.object({ kind: z.literal('setKiwiSaverWithdrawal'), on: z.boolean() }),
+  z.object({ kind: z.literal('setInflation'), value: z.number().min(0).max(0.1) }),
+  z.object({ kind: z.literal('setRetirementAge'), age: z.number().int().min(50).max(80) }),
+  z.object({ kind: z.literal('setCreditCardLimit'), debtId: z.string().optional(), limit: z.number().min(0) }),
+  z.object({ kind: z.literal('removeDebt'), debtId: z.string().optional(), debtKind: z.enum(['personal-loan', 'credit-card', 'store-card', 'other']).optional() }),
+  z.object({ kind: z.literal('setKiwiSaverReturn'), value: z.number().min(-0.02).max(0.12) }),
 ]);
 
 /** Human-readable chip label for a proposed change. */
@@ -114,5 +149,19 @@ export function describeChange(c: ScenarioChange): string {
     case 'closeCreditCards': return 'Close credit cards';
     case 'lumpSumRepayment': return `Lump sum ${fmt(c.amount)} onto mortgage`;
     case 'addValuation': return `${c.sourceName ?? 'Valuation'} → ${fmt(c.value)}`;
+    case 'setIncome': return `Income → ${fmt(c.grossAnnual)} gross/yr`;
+    case 'addGrossIncome': return `${c.label} +${fmt(c.grossAnnual)} gross/yr`;
+    case 'setStressRate': return `Test rate → ${(c.value * 100).toFixed(2)}%`;
+    case 'setLoanTerm': return `Loan term → ${c.years} years`;
+    case 'setLowEquityMargin': return `Low-equity margin → ${(c.value * 100).toFixed(2)}%`;
+    case 'setOwnershipCost': return `${c.item === 'rates' ? 'Rates' : c.item === 'insurance' ? 'Home insurance' : 'Other ownership costs'} → ${fmt(c.monthly)}/mo`;
+    case 'setCashback': return `Cashback → ${fmt(c.amount)}${c.retentionMonths ? ` (${c.retentionMonths}mo retention)` : ''}`;
+    case 'kiwiSaverLumpSum': return `KiwiSaver lump sum ${fmt(c.amount)}`;
+    case 'setKiwiSaverWithdrawal': return c.on ? 'Model first-home KiwiSaver withdrawal' : 'No KiwiSaver withdrawal';
+    case 'setInflation': return `Inflation → ${(c.value * 100).toFixed(1)}%/yr`;
+    case 'setRetirementAge': return `Retirement age → ${c.age}`;
+    case 'setCreditCardLimit': return `Card limit → ${fmt(c.limit)}`;
+    case 'removeDebt': return c.debtKind ? `Remove ${c.debtKind.replace('-', ' ')}` : 'Remove debt';
+    case 'setKiwiSaverReturn': return `KiwiSaver return → ${(c.value * 100).toFixed(1)}%/yr`;
   }
 }

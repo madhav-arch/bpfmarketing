@@ -1,9 +1,12 @@
 import type { Client } from '../domain/types';
 import type {
+  CashbackAssumptions,
   CostAssumptions,
   KiwiSaverSettings,
+  KiwiSaverWithdrawalWorkflow,
   LenderPolicy,
   ModellingAssumptions,
+  OwnershipCostAssumptions,
   RetirementSettings,
   TaxTable,
 } from '../rules/types';
@@ -13,7 +16,7 @@ import { computeFhb, type FhbResult } from '../calculators/fhb';
 import { combinedTrajectory, type AmortisationPoint } from '../calculators/amortisation';
 import { computeInvestment, type InvestmentResult } from '../calculators/investment';
 import { projectKiwiSaver, kiwiSaverPosition, type KiwiSaverProjection, type KiwiSaverPositionNote } from '../calculators/kiwisaver';
-import { computeRetirement, netWorthTrajectory, type RetirementResult } from '../calculators/retirement';
+import { computeRetirement, netWorthTrajectory, type KsProjectionOpts, type RetirementResult } from '../calculators/retirement';
 import { computeProtection, type ProtectionResult } from '../calculators/insurance';
 import { compareRefinance, fixedExpiryTimeline, type RefinanceComparison, type ExpiryTimelineItem } from '../calculators/refinance';
 import { compareRevolvingStrategy, type RevolvingComparisonResult } from '../calculators/revolving';
@@ -29,6 +32,9 @@ export interface RuleContext {
   kiwiSaver: KiwiSaverSettings;
   retirement: RetirementSettings;
   modelling: ModellingAssumptions;
+  ownership: OwnershipCostAssumptions;
+  cashback: CashbackAssumptions;
+  ksWithdrawal: KiwiSaverWithdrawalWorkflow;
 }
 
 export interface Snapshot {
@@ -72,14 +78,26 @@ export interface CalculationResult {
   refinance?: RefinanceComparison;
   expiryTimeline: ExpiryTimelineItem[];
   revolving?: RevolvingComparisonResult;
+  /** inflation assumption in force (scenario override or rule-set default) */
+  inflation: number;
+  /** the test rate the Blueprint modelling view used this scenario */
+  effectiveStressRate: number;
   ruleSetIds: string[];
 }
 
 export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationResult {
   const client = state.client;
-  const servicing = computeServicing(client, ctx.policy, ctx.tax, state.servicingOpts);
-  const lenderComparison = compareLenders(client, ctx.lenders, ctx.tax, state.servicingOpts);
-  const equity = computeEquity(client, ctx.policy, ctx.modelling);
+  // Adviser-configurable test rate: overrides the Blueprint modelling policy
+  // for this scenario. Bank profiles keep their own extracted rates.
+  const policy: LenderPolicy = state.stressRateOverride !== undefined
+    ? { ...ctx.policy, stressRate: state.stressRateOverride }
+    : ctx.policy;
+  const lenders = state.stressRateOverride !== undefined
+    ? ctx.lenders.map((l) => (l.id === ctx.policy.id ? policy : l))
+    : ctx.lenders;
+  const servicing = computeServicing(client, policy, ctx.tax, state.servicingOpts);
+  const lenderComparison = compareLenders(client, lenders, ctx.tax, state.servicingOpts);
+  const equity = computeEquity(client, policy, ctx.modelling);
 
   // --- Amortisation: current path (actual repayments) vs Blueprint path
   const loanInputs = client.mortgages.map((m) => ({
@@ -96,9 +114,15 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
   // --- FHB
   let fhb: FhbResult | undefined;
   if (client.targetPurchase) {
-    fhb = computeFhb(client.targetPurchase, ctx.policy, ctx.fhbCosts, {
+    fhb = computeFhb(client.targetPurchase, policy, ctx.fhbCosts, {
       baseRate: state.rateAbsolute ?? client.modellingRate + state.rateDelta,
       bankMaxLoan: servicing.maxNewLending,
+      termYears: state.loanTermYearsOverride,
+      lemOverride: state.lowEquityMarginOverride,
+      ownership: ctx.ownership,
+      ownershipOverrides: state.ownershipCosts,
+      cashback: ctx.cashback,
+      cashbackOverride: state.cashbackOverride,
     });
   }
 
@@ -118,7 +142,7 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
         ratesPerYear: Math.round(p.price * 0.0035),
         insurancePerYear: 1800,
       },
-      ctx.policy,
+      policy,
       ctx.modelling,
     );
   }
@@ -128,10 +152,32 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
     5,
     client.retirement.targetAge - Math.max(...client.applicants.map((a) => a.age)),
   );
+  // First-home withdrawal: modelled by default for FHB accounts flagged with
+  // firstHomeIntent when a purchase is on the table; adviser can force on/off.
+  const withdrawalOn =
+    state.kiwiSaverWithdrawal ??
+    (client.clientType === 'fhb' && !!client.targetPurchase && client.targetPurchase.depositSources.kiwiSaver > 0);
+  const ksTotalBalance = client.kiwiSaverAccounts.reduce((s, a) => s + a.balance.value, 0);
+  const withdrawalFor = (accountId: string) => {
+    if (!withdrawalOn || !client.targetPurchase) return undefined;
+    const acc = client.kiwiSaverAccounts.find((a) => a.id === accountId);
+    if (!acc || (!acc.firstHomeIntent && client.kiwiSaverAccounts.some((a) => a.firstHomeIntent))) return undefined;
+    const share = ksTotalBalance > 0 ? acc.balance.value / ksTotalBalance : 0;
+    return {
+      year: 1,
+      amount: client.targetPurchase.depositSources.kiwiSaver * share,
+      keepMinimum: ctx.ksWithdrawal.minBalanceRetained,
+    };
+  };
+  const ksOpts: KsProjectionOpts = {
+    salaryGrowth: state.salaryGrowthOverride ?? 0,
+    returnOverride: state.kiwiSaverReturnOverride,
+    withdrawalFor,
+  };
   const kiwiSaverProjections = client.kiwiSaverAccounts.map((a) => ({
-    low: projectKiwiSaver(a, ctx.kiwiSaver, { mode: 'low', horizonYears, salaryGrowth: state.salaryGrowthOverride ?? 0 }),
-    base: projectKiwiSaver(a, ctx.kiwiSaver, { mode: 'base', horizonYears, salaryGrowth: state.salaryGrowthOverride ?? 0 }),
-    high: projectKiwiSaver(a, ctx.kiwiSaver, { mode: 'high', horizonYears, salaryGrowth: state.salaryGrowthOverride ?? 0 }),
+    low: projectKiwiSaver(a, ctx.kiwiSaver, { mode: 'low', horizonYears, salaryGrowth: ksOpts.salaryGrowth, withdrawal: withdrawalFor(a.id) }),
+    base: projectKiwiSaver(a, ctx.kiwiSaver, { mode: 'base', horizonYears, salaryGrowth: ksOpts.salaryGrowth, returnOverride: state.kiwiSaverReturnOverride, withdrawal: withdrawalFor(a.id) }),
+    high: projectKiwiSaver(a, ctx.kiwiSaver, { mode: 'high', horizonYears, salaryGrowth: ksOpts.salaryGrowth, withdrawal: withdrawalFor(a.id) }),
   }));
   const kiwiSaverNotes = client.kiwiSaverAccounts.flatMap((a) => {
     const owner = client.applicants.find((ap) => ap.id === a.applicantId);
@@ -144,10 +190,13 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
     : ctx.retirement;
   const retirement = computeRetirement(client, retirementSettings, ctx.kiwiSaver, {
     extraRepaymentMonthly: state.extraRepaymentMonthly,
+    inflationOverride: state.inflationOverride,
+    ks: ksOpts,
   });
   const netWorthPath = netWorthTrajectory(client, retirementSettings, ctx.kiwiSaver, {
     years: Math.max(horizonYears, 20),
     extraRepaymentMonthly: state.extraRepaymentMonthly,
+    ks: ksOpts,
   });
 
   // --- Protection
@@ -158,7 +207,7 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
   if (client.refinanceContext && client.mortgages.length > 0) {
     const rc = client.refinanceContext;
     refinance = compareRefinance(client.mortgages, {
-      policy: ctx.policy,
+      policy,
       modelling: ctx.modelling,
       proposedRate: rc.proposedRate,
       currentMarketRate: rc.currentMarketRate,
@@ -238,6 +287,8 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
     refinance,
     expiryTimeline,
     revolving,
+    inflation: state.inflationOverride ?? ctx.retirement.inflation,
+    effectiveStressRate: policy.stressRate,
     ruleSetIds: [
       ctx.policy.id,
       ...ctx.lenders.map((l) => l.id),
@@ -246,6 +297,9 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
       ctx.kiwiSaver.id,
       ctx.retirement.id,
       ctx.modelling.id,
+      ctx.ownership.id,
+      ctx.cashback.id,
+      ctx.ksWithdrawal.id,
     ],
   };
 }

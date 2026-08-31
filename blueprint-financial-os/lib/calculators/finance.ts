@@ -30,6 +30,15 @@ export function futureValueOfSeries(
   return (paymentPerPeriod * (Math.pow(1 + ratePerPeriod, periods) - 1)) / ratePerPeriod;
 }
 
+/**
+ * Deflate a nominal future amount into today's purchasing power.
+ * `$1,420,000 in 30 years at 2.2% inflation ≈ $740k in today's dollars.`
+ */
+export function todaysDollars(nominal: number, inflation: number, years: number): number {
+  if (years <= 0) return nominal;
+  return nominal / Math.pow(1 + inflation, years);
+}
+
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }

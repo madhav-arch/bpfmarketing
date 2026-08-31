@@ -13,8 +13,20 @@ export interface Insight {
   discuss?: string;
 }
 
+export interface InsightFeedFacts {
+  actualSpendMonthly: number;
+  declaredSpendMonthly: number;
+  outlierCount: number;
+  reviewCategories: string[]; // categories flagged materially above benchmark
+}
+
 /** Deterministic, rules-based insights — computed, never invented. */
-export function generateInsights(client: Client, result: CalculationResult, ctx: RuleContext): Insight[] {
+export function generateInsights(
+  client: Client,
+  result: CalculationResult,
+  ctx: RuleContext,
+  feed?: InsightFeedFacts,
+): Insight[] {
   const insights: Insight[] = [];
   const money = (n: number) => `$${Math.round(Math.abs(n)).toLocaleString()}`;
 
@@ -178,6 +190,97 @@ export function generateInsights(client: Client, result: CalculationResult, ctx:
         message: `${evt.label} frees roughly ${money(evt.monthlyImpact)}/month — materially improving borrowing capacity from that point.`,
         supporting: [{ label: evt.label, value: evt.monthlyImpact, format: 'currency' }],
         sourceRuleSetId: ctx.modelling.id,
+      });
+    }
+  }
+
+  // Deposit close to unlocking a better LVR tier
+  if (result.fhb) {
+    const nextTier = result.fhb.tiers.find((t) => !t.achievable);
+    if (nextTier && nextTier.additionalRequired > 0 && nextTier.additionalRequired < result.fhb.purchasePrice * 0.06) {
+      const currentTier = [...result.fhb.tiers].reverse().find((t) => t.achievable);
+      const marginDrop = (currentTier?.lowEquityMargin ?? result.fhb.lowEquityMargin) - nextTier.lowEquityMargin;
+      insights.push({
+        id: 'deposit-tier-unlock',
+        severity: 'opportunity',
+        category: 'mortgage',
+        message: `The deposit is ${money(nextTier.additionalRequired)} short of the ${Math.round(nextTier.depositPercent * 100)}% tier${marginDrop > 0 ? `, which drops the low-equity margin by ${(marginDrop * 100).toFixed(2)}% and the fortnightly repayment to ${money(nextTier.repaymentFortnightly)}` : ''}. A gift or extra savings unlocks it live.`,
+        supporting: [
+          { label: `Additional cash for ${Math.round(nextTier.depositPercent * 100)}%`, value: nextTier.additionalRequired, format: 'currency' },
+          { label: 'Margin at that tier', value: nextTier.lowEquityMargin, format: 'percent' },
+        ],
+        sourceRuleSetId: ctx.policy.id,
+        discuss: 'Is a family gift or a short savings push realistic before the purchase?',
+      });
+    }
+  }
+
+  // First-home withdrawal changes the retirement projection
+  const withdrawal = result.kiwiSaverProjections.map((p) => p.base.withdrawalEvent).find((w) => w);
+  if (withdrawal) {
+    insights.push({
+      id: 'ks-withdrawal-retirement',
+      severity: 'info',
+      category: 'kiwisaver',
+      message: `The modelled first-home withdrawal takes ${money(withdrawal.amount)} out of KiwiSaver, and the retirement projection continues from the post-withdrawal balance — today's purchase decision changes the age-${client.retirement.targetAge} position.`,
+      supporting: [
+        { label: 'Withdrawal (modelled)', value: -withdrawal.amount, format: 'currency' },
+        { label: 'Balance after', value: withdrawal.balanceAfter, format: 'currency' },
+      ],
+      sourceRuleSetId: ctx.ksWithdrawal.id,
+      discuss: 'Does the contribution rate need to rise after settlement to rebuild the balance?',
+    });
+  }
+
+  // Premium burden (ratio-based; never a fabricated market average)
+  if (result.protection.premiumBurdenPercent > 0.05) {
+    insights.push({
+      id: 'premium-burden',
+      severity: 'attention',
+      category: 'protection',
+      message: `Insurance premiums run at ${(result.protection.premiumBurdenPercent * 100).toFixed(1)}% of household net income — a material burden. Confirm what policies and benefits are included before drawing conclusions; premium alone proves nothing about over- or under-insurance.`,
+      supporting: [{ label: 'Premium share of net income', value: result.protection.premiumBurdenPercent, format: 'percent' }],
+      sourceRuleSetId: ctx.modelling.id,
+      discuss: 'What covers, excesses and benefit periods sit behind these premiums?',
+    });
+  }
+
+  // Feed-derived facts (passed in from the transaction-intelligence layer)
+  if (feed) {
+    const variance = feed.actualSpendMonthly - feed.declaredSpendMonthly;
+    if (feed.declaredSpendMonthly > 0 && Math.abs(variance) > Math.max(400, feed.declaredSpendMonthly * 0.25)) {
+      insights.push({
+        id: 'declared-vs-actual',
+        severity: 'attention',
+        category: 'expenses',
+        message: `The statements show ${money(feed.actualSpendMonthly)}/month of lifestyle spending against ${money(feed.declaredSpendMonthly)}/month declared — a ${money(variance)} gap. Lenders reconcile statements against the application.`,
+        supporting: [
+          { label: 'Actual (statements)', value: feed.actualSpendMonthly, format: 'currency' },
+          { label: 'Declared (Fact Find)', value: -feed.declaredSpendMonthly, format: 'currency' },
+        ],
+        sourceRuleSetId: ctx.policy.id,
+        discuss: 'Align the declared figures with the statements before any application.',
+      });
+    }
+    for (const cat of feed.reviewCategories.slice(0, 2)) {
+      insights.push({
+        id: `bench-${cat}`,
+        severity: 'info',
+        category: 'expenses',
+        message: `${cat} is materially above the comparison benchmark in the transaction data — worth reviewing whether it reflects ongoing spending or a season of one-offs.`,
+        supporting: [],
+        sourceRuleSetId: ctx.policy.id,
+        discuss: `Is the recent ${cat.toLowerCase()} level the ongoing normal?`,
+      });
+    }
+    if (feed.outlierCount > 0) {
+      insights.push({
+        id: 'outliers-present',
+        severity: 'info',
+        category: 'expenses',
+        message: `${feed.outlierCount} unusual one-off transaction${feed.outlierCount > 1 ? 's' : ''} detected in the feed — check "Items worth checking" so one-offs are not treated as permanent monthly spending.`,
+        supporting: [],
+        sourceRuleSetId: ctx.policy.id,
       });
     }
   }

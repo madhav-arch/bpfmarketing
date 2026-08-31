@@ -173,6 +173,27 @@ function feedFor(client: Client, seed: number): FeedSnapshot {
   // savings sweep
   txs.push(...buildTransactions([{ merchant: 'Transfer to savings', category: 'Transfers', monthly: 600 * scale, timesPerMonth: 1, jitter: 0.3 }], 'acc-txn', rnd, -1));
 
+  // Deliberate one-off outliers — the "Items worth checking" screen exists to
+  // catch exactly these, so the demo feed always contains a few.
+  const outliers: { merchant: string; amount: number; daysAgo: number }[] = [
+    { merchant: 'Air New Zealand', amount: 1240 + Math.round(rnd() * 300), daysAgo: 22 },
+    { merchant: 'Airbnb', amount: 870 + Math.round(rnd() * 150), daysAgo: 20 },
+    { merchant: 'Harvey Norman', amount: 2150 + Math.round(rnd() * 400), daysAgo: 48 },
+    { merchant: 'VTNZ Vehicle Repair', amount: 980 + Math.round(rnd() * 200), daysAgo: 66 },
+  ];
+  outliers.forEach((o, i) => {
+    const d = new Date(END);
+    d.setDate(d.getDate() - o.daysAgo);
+    txs.push({
+      id: `outlier-${i}`,
+      accountId: 'acc-txn',
+      date: d.toISOString().slice(0, 10),
+      description: o.merchant,
+      merchant: o.merchant,
+      amount: -o.amount,
+    });
+  });
+
   txs.sort((a, b) => b.date.localeCompare(a.date));
 
   return {

@@ -12,7 +12,10 @@ export interface SectionProps {
   baseline: CalculationResult;
   presentation: boolean;
   openAudit: (req: AuditRequest) => void;
-  addChanges: (changes: ScenarioChange[], name?: string) => void;
+  addChanges: (changes: ScenarioChange[], name?: string, by?: 'adviser' | 'copilot') => void;
+  /** compute active scenario + extra changes without applying (for BEFORE → AFTER previews) */
+  computePreview: (extra: ScenarioChange[]) => CalculationResult;
+  onSaveScenario: (name?: string) => void;
   ctx: RuleContext;
   feed: FeedState;
 }

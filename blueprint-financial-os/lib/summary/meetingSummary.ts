@@ -13,6 +13,12 @@ export interface SummaryInput {
   selected: CalculationResult;
   diffs: ChangeExplanation[];
   rationale: { benefits: string[]; risks: string[]; considerations: string[] };
+  /** adviser-written notes captured during the meeting */
+  adviserNotes?: string;
+  /** extra saved scenarios for the comparison table (name + result) */
+  comparisonScenarios?: { name: string; result: CalculationResult }[];
+  /** items the client still needs to supply */
+  outstandingInformation?: string[];
 }
 
 /**
@@ -99,10 +105,36 @@ export function buildMeetingSummary(input: SummaryInput): string {
     lines.push('');
   }
 
+  // Scenario comparison table (concise, engine figures only)
+  if (input.comparisonScenarios && input.comparisonScenarios.length > 0) {
+    const cols = [{ name: 'Baseline', result: baseline }, { name: input.scenarioName, result: selected }, ...input.comparisonScenarios].slice(0, 4);
+    lines.push('## Scenario comparison');
+    lines.push(`| | ${cols.map((c) => c.name).join(' | ')} |`);
+    lines.push(`|---|${cols.map(() => '---').join('|')}|`);
+    const row = (label: string, get: (r: CalculationResult) => string) =>
+      lines.push(`| ${label} | ${cols.map((c) => get(c.result)).join(' | ')} |`);
+    row('Monthly surplus', (r) => $(r.snapshot.monthlySurplus));
+    row('Borrowing capacity', (r) => `${$(r.lenderComparison.range.min)}–${$(r.lenderComparison.range.max)}`);
+    if (client.mortgages.length > 0) {
+      row('Mortgage-free', (r) => (r.amortisation.blueprint.paidOff ? `~${r.amortisation.blueprint.payoffYear}` : 'IO — no payoff path'));
+      row('Interest remaining', (r) => $(r.amortisation.blueprint.totalInterest));
+    }
+    if (selected.fhb) {
+      row('Purchase price', (r) => (r.fhb ? $(r.fhb.purchasePrice) : '—'));
+      row('Deposit', (r) => (r.fhb ? `${(r.fhb.depositPercent * 100).toFixed(1)}%` : '—'));
+      row('Repayment /fn', (r) => (r.fhb ? $(r.fhb.repaymentFortnightly) : '—'));
+    }
+    row('KiwiSaver at retirement (nominal)', (r) => $(r.snapshot.kiwiSaverProjected));
+    lines.push('');
+  }
+
   lines.push('## KiwiSaver & retirement');
-  lines.push(`- KiwiSaver today: ${$(s.kiwiSaverNow)} → projected ${$(s.kiwiSaverProjected)} at retirement (base assumptions)`);
+  lines.push(`- KiwiSaver today: ${$(s.kiwiSaverNow)} → projected ${$(s.kiwiSaverProjected)} at retirement (nominal, base assumptions; ≈ ${$(selected.retirement.projectedKiwiSaverToday)} in today's dollars at ${(selected.inflation * 100).toFixed(1)}% inflation)`);
   lines.push(
-    `- Projected retirement income vs goal: ${s.retirementGap >= 0 ? `surplus of ${$(s.retirementGap)}/yr` : `gap of ${$(-s.retirementGap)}/yr`} (4% drawdown planning assumption — not a guarantee)`,
+    `- Projected retirement income vs goal: ${s.retirementGap >= 0 ? `surplus of ${$(s.retirementGap)}/yr` : `gap of ${$(-s.retirementGap)}/yr`} (${(selected.retirement.drawdownRate * 100).toFixed(0)}% drawdown is a planning heuristic, not a guarantee)`,
+  );
+  lines.push(
+    `- Projected retirement income in today's dollars: ≈ ${$(selected.retirement.projectedAnnualIncomeToday)}/yr (${$(selected.retirement.projectedWeeklyIncomeToday)}/week)`,
   );
   lines.push('');
   if (selected.protection.issues.length > 0) {
@@ -124,6 +156,16 @@ export function buildMeetingSummary(input: SummaryInput): string {
     for (const c of input.rationale.considerations) lines.push(`- ${c}`);
   }
   lines.push('');
+  if (input.adviserNotes && input.adviserNotes.trim().length > 0) {
+    lines.push('## Adviser notes from the meeting');
+    for (const n of input.adviserNotes.split('\n').filter((x) => x.trim())) lines.push(`- ${n.trim()}`);
+    lines.push('');
+  }
+  if (input.outstandingInformation && input.outstandingInformation.length > 0) {
+    lines.push('## Outstanding information');
+    for (const o of input.outstandingInformation) lines.push(`- ${o}`);
+    lines.push('');
+  }
   lines.push('## Next steps');
   lines.push('- Confirm the figures above against source documents (IRD income summary, statements, accountant financials).');
   lines.push('- Blueprint to confirm lender policy details before any application.');

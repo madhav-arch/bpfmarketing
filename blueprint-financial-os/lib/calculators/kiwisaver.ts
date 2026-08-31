@@ -1,6 +1,12 @@
 import type { AuditLine, KiwiSaverAccount } from '../domain/types';
 import type { KiwiSaverSettings } from '../rules/types';
 
+export interface KiwiSaverWithdrawalEvent {
+  year: number;
+  amount: number;
+  balanceAfter: number;
+}
+
 export interface KiwiSaverProjection {
   accountId: string;
   mode: 'low' | 'base' | 'high';
@@ -11,6 +17,8 @@ export interface KiwiSaverProjection {
   atHorizon: number;
   horizonYears: number;
   contributionMonthly: number;
+  /** first-home withdrawal modelled in this projection, when applicable */
+  withdrawalEvent?: KiwiSaverWithdrawalEvent;
   audit: AuditLine[];
 }
 
@@ -22,11 +30,16 @@ export function projectKiwiSaver(
     horizonYears: number;
     salaryGrowth?: number;
     contributionRateOverride?: number;
+    /** annual net return override (adviser assumption) — replaces the mode band */
+    returnOverride?: number;
+    /** model a first-home withdrawal: at `year`, withdraw `amount` (capped so
+     *  at least `keepMinimum` stays in the account) */
+    withdrawal?: { year: number; amount: number; keepMinimum: number };
   },
 ): KiwiSaverProjection {
   const gross = settings.returnAssumptions[opts.mode];
   const fee = account.feesPercent ?? settings.defaultFeePercent;
-  const net = gross - fee;
+  const net = opts.returnOverride ?? gross - fee;
   const monthlyRate = net / 12;
   const salaryGrowth = opts.salaryGrowth ?? 0;
   const contributionRate = opts.contributionRateOverride ?? account.contributionRate;
@@ -35,6 +48,7 @@ export function projectKiwiSaver(
   let salary = account.salaryForContribution;
   const balances: { year: number; balance: number }[] = [{ year: 0, balance }];
   const years = Math.max(1, Math.round(opts.horizonYears));
+  let withdrawalEvent: KiwiSaverWithdrawalEvent | undefined;
 
   for (let y = 1; y <= years; y++) {
     const memberAnnual = salary * contributionRate + (account.voluntaryMonthly ?? 0) * 12;
@@ -44,6 +58,12 @@ export function projectKiwiSaver(
     const monthly = (memberAnnual + employerAnnual + govt) / 12;
     for (let m = 0; m < 12; m++) {
       balance = balance * (1 + monthlyRate) + monthly;
+    }
+    if (opts.withdrawal && y === Math.max(1, Math.round(opts.withdrawal.year))) {
+      const maxWithdrawable = Math.max(0, balance - opts.withdrawal.keepMinimum);
+      const amount = Math.min(opts.withdrawal.amount, maxWithdrawable);
+      balance -= amount;
+      withdrawalEvent = { year: y, amount, balanceAfter: balance };
     }
     salary *= 1 + salaryGrowth;
     balances.push({ year: y, balance });
@@ -63,7 +83,11 @@ export function projectKiwiSaver(
     atHorizon: balances[years].balance,
     horizonYears: years,
     contributionMonthly: (memberAnnual0 + employerAnnual0) / 12,
+    withdrawalEvent,
     audit: [
+      ...(withdrawalEvent
+        ? [{ label: `First-home withdrawal (year ${withdrawalEvent.year})`, value: -withdrawalEvent.amount, format: 'currency' as const, note: `Balance continues from $${Math.round(withdrawalEvent.balanceAfter).toLocaleString()} after the withdrawal — today's purchase decision changes the retirement projection.` }]
+        : []),
       { label: 'Current balance', value: account.balance.value, format: 'currency', note: account.balance.sourceName },
       { label: `Member contributions (${(contributionRate * 100).toFixed(1)}% of salary${account.voluntaryMonthly ? ' + voluntary' : ''})`, value: memberAnnual0 / 12, format: 'currency', note: 'per month' },
       { label: `Employer contributions (${(account.employerRate * 100).toFixed(0)}% less ESCT)`, value: employerAnnual0 / 12, format: 'currency', note: 'per month' },

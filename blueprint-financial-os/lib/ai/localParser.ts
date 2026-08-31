@@ -38,6 +38,76 @@ interface Rule {
 }
 
 const RULES: Rule[] = [
+  // --- Iteration 2 verbs (before the generic rate rules — order matters) ----
+  {
+    pattern: /(?:stress|test)\s*(?:rate|test)(?:\s*(?:of|at|to|→))?\s*([\d.]+)\s*%|stress\s*test\s*(?:them\s*)?at\s*([\d.]+)\s*%/i,
+    build: (m) => [{ kind: 'setStressRate', value: parseFloat(m[1] ?? m[2]) / 100 }],
+  },
+  {
+    pattern: /inflation\s*(?:of|at|to|→|assumption)?\s*([\d.]+)\s*%/i,
+    build: (m) => [{ kind: 'setInflation', value: parseFloat(m[1]) / 100 }],
+  },
+  {
+    pattern: /(?:retire\s+at|retirement\s+age\s*(?:of|to|→)?)\s*(\d{2})/i,
+    build: (m) => [{ kind: 'setRetirementAge', age: parseInt(m[1], 10) }],
+  },
+  {
+    pattern: new RegExp(String.raw`(?:put|add|deposit)\s+${NUM}\s+(?:in|into)\s+kiwi\s*saver`, 'i'),
+    build: (m) => [{ kind: 'kiwiSaverLumpSum', amount: parseAmount(m[1], m[2]) }],
+  },
+  {
+    pattern: /assume\s+([\d.]+)\s*%\s+(?:mortgage\s+)?rates?|mortgage\s+rates?\s+(?:of|at|to)\s+([\d.]+)\s*%/i,
+    build: (m) => [{ kind: 'setRateAbsolute', value: parseFloat(m[1] ?? m[2]) / 100 }],
+  },
+  {
+    pattern: new RegExp(String.raw`(?:reduce|drop|change|set)\s+(?:the\s+)?(?:credit\s+)?card\s+limit\s*(?:to|→)\s*${NUM}`, 'i'),
+    build: (m) => [{ kind: 'setCreditCardLimit', limit: parseAmount(m[1], m[2]) }],
+  },
+  {
+    pattern: /(?:remove|clear|pay\s+off|get\s+rid\s+of)\s+(?:the\s+)?personal\s+loan/i,
+    build: () => [{ kind: 'removeDebt', debtKind: 'personal-loan' }],
+  },
+  {
+    pattern: new RegExp(String.raw`loan\s+term\s*(?:of|to|→)?\s*(\d{1,2})\s*(?:years|yrs?)`, 'i'),
+    build: (m) => [{ kind: 'setLoanTerm', years: parseInt(m[1], 10) }],
+  },
+  {
+    pattern: new RegExp(String.raw`cashback\s+(?:of\s+|at\s+|to\s+)?${NUM}`, 'i'),
+    build: (m) => [{ kind: 'setCashback', amount: parseAmount(m[1], m[2]) }],
+  },
+  {
+    pattern: new RegExp(String.raw`(?:make|set)\s+the\s+deposit\s+${NUM}`, 'i'),
+    build: (m, ctx) => {
+      const target = parseAmount(m[1], m[2]);
+      const d = ctx.client.targetPurchase?.depositSources;
+      if (!d) return null;
+      const have = d.kiwiSaver + d.savings + d.gift + d.other;
+      if (have <= 0) return [{ kind: 'setDepositSource', source: 'savings', value: target }];
+      const f = target / have;
+      return [
+        { kind: 'setDepositSource', source: 'kiwiSaver', value: Math.round(d.kiwiSaver * f) },
+        { kind: 'setDepositSource', source: 'savings', value: Math.round(d.savings * f) },
+        ...(d.gift > 0 ? [{ kind: 'setDepositSource', source: 'gift', value: Math.round(d.gift * f) } as const] : []),
+        ...(d.other > 0 ? [{ kind: 'setDepositSource', source: 'other', value: Math.round(d.other * f) } as const] : []),
+      ];
+    },
+  },
+  {
+    pattern: new RegExp(String.raw`(?:add|with)\s+a?\s*(?:family\s+)?gift\s+(?:of\s+)?${NUM}`, 'i'),
+    build: (m) => [{ kind: 'setDepositSource', source: 'gift', value: parseAmount(m[1], m[2]) }],
+  },
+  {
+    pattern: /(?:show\s+me\s+)?where\s+(?:they|we|i)(?:\s+are|'re)?\s+at\s+(\d{2})\b/i,
+    build: (m) => [{ kind: 'setHorizonAge', age: parseInt(m[1], 10) }],
+  },
+  {
+    pattern: new RegExp(String.raw`(?:increase|set|change)\s+(?:([\w]+)(?:'s)?\s+)?(?:salary|income)\s+(?:to|→)\s+${NUM}`, 'i'),
+    build: (m, ctx) => {
+      const name = (m[1] ?? '').toLowerCase();
+      const idx = Math.max(0, ctx.client.applicants.findIndex((a) => a.displayName.toLowerCase().includes(name)));
+      return [{ kind: 'setIncome', applicantIndex: name ? idx : 0, grossAnnual: parseAmount(m[2], m[3]) }];
+    },
+  },
   // --- Repayments -----------------------------------------------------------
   {
     pattern: new RegExp(String.raw`(increase|raise|bump|add|extra|up)\s+(?:the\s+)?(?:mortgage\s+)?repayments?\s*(?:by\s*)?${NUM}(?:\s*(?:a|per|\/)\s*(week|fortnight|month|year))?`, 'i'),
@@ -206,7 +276,7 @@ const RULES: Rule[] = [
   },
   // --- KiwiSaver ------------------------------------------------------------
   {
-    pattern: /kiwi\s*saver\s+(?:contribution\s+)?(?:rate\s+)?(?:from\s+[\d.]+\s*%?\s+)?to\s+([\d.]+)\s*%/i,
+    pattern: /kiwi\s*saver\s+(?:contributions?\s+)?(?:rate\s+)?(?:from\s+[\d.]+\s*%?\s+)?to\s+([\d.]+)\s*%/i,
     build: (m) => [{ kind: 'setKiwiSaverRate', rate: parseFloat(m[1]) / 100 }],
   },
   // --- Growth assumptions ---------------------------------------------------

@@ -74,8 +74,32 @@ export interface CostAssumptions extends RuleSetMeta {
     label: string;
     amount: number;
     stage: 'before-finance' | 'due-diligence' | 'settlement';
+    required?: boolean; // false = optional/discretionary
     note?: string;
   }[];
+}
+
+/** Ongoing ownership costs beyond the mortgage — editable defaults. */
+export interface OwnershipCostAssumptions extends RuleSetMeta {
+  ratesMonthly: number;
+  insuranceMonthly: number; // home + contents
+  otherMonthly: number; // body corp, maintenance sinking fund, etc.
+}
+
+/** Lender cashback — a configurable offer example, never an entitlement. */
+export interface CashbackAssumptions extends RuleSetMeta {
+  amount: number;
+  retentionMonths: number;
+  clawbackMethod: 'pro-rata' | 'full' | 'none';
+  paymentTiming: string;
+  eligibilityNote: string;
+}
+
+/** KiwiSaver first-home withdrawal workflow assumptions. */
+export interface KiwiSaverWithdrawalWorkflow extends RuleSetMeta {
+  processingWorkingDays: number; // configurable — not a guarantee
+  minBalanceRetained: number; // must stay in the account
+  cautionNote: string;
 }
 
 export interface KiwiSaverSettings extends RuleSetMeta {
@@ -105,4 +129,6 @@ export interface ModellingAssumptions extends RuleSetMeta {
   equityDepositRate: number; // deposit rate assumed when recycling equity (0.30)
   refinanceLawyerFee: number;
   entityChangeLawyerFee: number;
+  saleAgentFeeRate: number; // of sale price
+  saleLegalFee: number;
 }

@@ -348,6 +348,194 @@ export function benchmarkComparison(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Three-way expense table: AKAHU ACTUAL vs FACT FIND DECLARED vs BANK
+// BENCHMARK per category. Three different concepts, never blended. The bank
+// benchmarks a household *bucket*, not categories, so per-category benchmark
+// figures are the bucket apportioned by fixed Blueprint comparison weights —
+// labelled "comparison benchmark" in the UI for exactly that reason.
+
+const BASELINE_WEIGHTS: Partial<Record<SpendCategory, number>> = {
+  'Food & groceries': 0.42,
+  'Eating out & takeaways': 0.12,
+  'Utilities & phone': 0.16,
+  'Health & personal care': 0.08,
+  'Entertainment & lifestyle': 0.09,
+  'Household & garden': 0.07,
+  Subscriptions: 0.03,
+  Other: 0.03,
+};
+
+export interface ThreeWayRow {
+  category: string;
+  akahuActualMonthly?: number;
+  factFindMonthly?: number;
+  benchmarkMonthly?: number;
+  /** actual vs comparison benchmark, e.g. +0.82 = 82% above */
+  differenceVsBenchmark?: number;
+  status: 'ok' | 'review' | 'info';
+  observation?: string;
+  bucket: 'baseline' | 'vehicles' | 'commitments' | 'other';
+}
+
+export interface ThreeWayTable {
+  rows: ThreeWayRow[];
+  actualTotal: number;
+  declaredTotal: number;
+  benchmarkTotal: number;
+  note: string;
+}
+
+export function threeWayExpenseTable(
+  analysis: FeedAnalysis,
+  client: Client,
+  policy: LenderPolicy,
+  netIncomeMonthly: number,
+  opts: { excludedMonthlyByCategory?: Record<string, number> } = {},
+): ThreeWayTable {
+  const bench = policy.expenseBenchmark;
+  const baselineBenchmark =
+    (client.household.adults === 2 ? bench.couple : bench.single) + bench.perDependant * client.household.dependants;
+  const declaredFor = (cats: SpendCategory[]) => {
+    let total = 0;
+    let found = false;
+    for (const [re, cs] of DECLARED_MATCH) {
+      if (cs.some((c) => cats.includes(c))) {
+        const matches = client.expenses.declaredMonthly.filter((d) => re.test(d.category));
+        if (matches.length) {
+          found = true;
+          total += matches.reduce((s, m) => s + m.amount, 0);
+        }
+      }
+    }
+    return found ? total : undefined;
+  };
+
+  const rows: ThreeWayRow[] = [];
+  const excluded = opts.excludedMonthlyByCategory ?? {};
+  for (const c of analysis.spendByCategory) {
+    if (NON_SPEND_CATEGORIES.includes(c.category)) continue;
+    const isBaseline = BASELINE_CATEGORIES.includes(c.category);
+    const isVehicle = VEHICLE_CATEGORIES.includes(c.category);
+    const isCommitment = COMMITMENT_CATEGORIES.includes(c.category);
+    const actual = Math.max(0, c.monthlyAverage - (excluded[c.category] ?? 0));
+    const benchmarkMonthly = isBaseline
+      ? baselineBenchmark * (BASELINE_WEIGHTS[c.category] ?? 0.03)
+      : isVehicle
+        ? bench.perVehicle * client.household.vehicles || undefined
+        : undefined;
+    const diff = benchmarkMonthly && benchmarkMonthly > 0 ? actual / benchmarkMonthly - 1 : undefined;
+    const pctOfNet = netIncomeMonthly > 0 ? actual / netIncomeMonthly : 0;
+    let status: ThreeWayRow['status'] = 'ok';
+    let observation: string | undefined;
+    if (diff !== undefined && diff > 0.3 && actual - (benchmarkMonthly ?? 0) > 150) {
+      status = 'review';
+      observation = `${c.category} represents ${(pctOfNet * 100).toFixed(1)}% of household net income and is materially above the current comparison benchmark.`;
+    } else if (c.declaredMonthly !== undefined && actual > c.declaredMonthly * 1.5 && actual - c.declaredMonthly > 150) {
+      status = 'review';
+      observation = `The statements show ${Math.round((actual / Math.max(1, c.declaredMonthly) - 1) * 100)}% more than the Fact Find declares for this category — lenders reconcile statements against the application.`;
+    }
+    if (c.category === 'Childcare & education' && actual > 200) {
+      const endEvent = client.financialEvents.find((e) => e.kind === 'childcare-end');
+      if (endEvent) {
+        status = status === 'review' ? 'review' : 'info';
+        observation = `Childcare is currently a significant fixed commitment, but the planned end date in ${endEvent.startDate.slice(0, 4)} materially changes future cashflow.`;
+      }
+    }
+    rows.push({
+      category: c.category,
+      akahuActualMonthly: actual,
+      factFindMonthly: c.declaredMonthly,
+      benchmarkMonthly,
+      differenceVsBenchmark: diff,
+      status,
+      observation,
+      bucket: isBaseline ? 'baseline' : isVehicle ? 'vehicles' : isCommitment ? 'commitments' : 'other',
+    });
+  }
+  rows.sort((a, b) => (b.akahuActualMonthly ?? 0) - (a.akahuActualMonthly ?? 0));
+
+  return {
+    rows,
+    actualTotal: rows.reduce((s, r) => s + (r.akahuActualMonthly ?? 0), 0),
+    declaredTotal: client.expenses.declaredMonthly.reduce((s, d) => s + d.amount, 0),
+    benchmarkTotal: baselineBenchmark + bench.perVehicle * client.household.vehicles,
+    note:
+      'Three separate concepts: what the statements show (Akahu actual), what the client declared (Fact Find), and the lender minimum (comparison benchmark — the bank benchmarks the household bucket; per-category figures apportion it by fixed comparison weights).',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// "Items worth checking" — meaningful one-off transactions that must not be
+// silently treated as permanent monthly spending.
+
+export interface OutlierTransaction {
+  id: string;
+  merchant: string;
+  date: string;
+  amount: number; // positive spend value
+  likelyCategory: SpendCategory;
+  recurring: 'yes' | 'no' | 'unknown';
+  reason: string;
+}
+
+const ONE_OFF_HINTS: [RegExp, string][] = [
+  [/air ?(nz|new zealand)|jetstar|qantas|flight/i, 'Flights'],
+  [/airbnb|hotel|accor|novotel|sudima/i, 'Accommodation'],
+  [/harvey norman|noel leeming|pb tech|jb hi-?fi/i, 'Large electronics or furniture purchase'],
+  [/furniture|freedom|nood|target furniture/i, 'Furniture'],
+  [/mechanic|automotive|vtnz|aa auto|panel ?beater/i, 'Vehicle repair'],
+  [/hospital|surgery|dental|specialist/i, 'Medical payment'],
+  [/wedding|event hire/i, 'Wedding or event'],
+];
+
+export function detectOutliers(snapshot: FeedSnapshot, opts: { minAmount?: number } = {}): OutlierTransaction[] {
+  const minAmount = opts.minAmount ?? 400;
+  const groups = new Map<string, FeedTransaction[]>();
+  for (const t of snapshot.transactions) {
+    if (t.amount >= 0) continue;
+    groups.set(normaliseMerchant(t), [...(groups.get(normaliseMerchant(t)) ?? []), t]);
+  }
+  const out: OutlierTransaction[] = [];
+  for (const t of snapshot.transactions) {
+    if (t.amount >= 0) continue;
+    const spend = -t.amount;
+    const cat = categoriseTransaction(t);
+    if (cat === 'Debt repayments' || cat === 'Transfers & savings' || cat === 'Rates') continue;
+    const peers = groups.get(normaliseMerchant(t)) ?? [t];
+    const merchantLabel = t.merchant ?? t.description;
+    const hint = ONE_OFF_HINTS.find(([re]) => re.test(merchantLabel));
+    const infrequent = peers.length <= 2;
+    const others = peers.filter((p) => p.id !== t.id).map((p) => -p.amount);
+    const typical = others.length ? others.reduce((s, a) => s + a, 0) / others.length : 0;
+    const sizeOutlier = spend >= minAmount && (infrequent || (typical > 0 && spend > typical * 3));
+    if (!hint && !sizeOutlier) continue;
+    if (spend < (hint ? 150 : minAmount)) continue;
+    out.push({
+      id: t.id,
+      merchant: merchantLabel,
+      date: t.date,
+      amount: spend,
+      likelyCategory: cat,
+      recurring: peers.length >= 3 ? 'yes' : peers.length === 1 ? 'no' : 'unknown',
+      reason: hint
+        ? hint[1]
+        : infrequent
+          ? 'Large amount from a merchant seen once or twice in the window'
+          : 'Well above this merchant’s typical transaction size',
+    });
+  }
+  out.sort((a, b) => b.amount - a.amount);
+  // de-duplicate: keep the largest few per merchant
+  const seen = new Map<string, number>();
+  return out.filter((o) => {
+    const k = o.merchant.toLowerCase();
+    const n = seen.get(k) ?? 0;
+    seen.set(k, n + 1);
+    return n < 2;
+  }).slice(0, 12);
+}
+
 /** Actual repayments seen in the feed vs recorded loan repayments. */
 export function repaymentCrossCheck(analysis: FeedAnalysis, client: Client): { feedMonthly: number; recordedMonthly: number } {
   return {

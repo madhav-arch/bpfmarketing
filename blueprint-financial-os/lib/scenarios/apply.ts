@@ -18,15 +18,27 @@ export interface ScenarioState {
   soldPropertyProceeds: number;
   purchasedProperty?: { price: number; rentPerWeek?: number; interestOnly?: boolean; ownerOccupied?: boolean };
   notes: string[];
+  // --- Iteration 2 assumption overrides (all versioned defaults elsewhere) --
+  stressRateOverride?: number;
+  loanTermYearsOverride?: number;
+  lowEquityMarginOverride?: number;
+  ownershipCosts: { ratesMonthly?: number; insuranceMonthly?: number; otherMonthly?: number };
+  cashbackOverride?: { amount: number; retentionMonths?: number };
+  /** undefined = default behaviour (withdraw when FHB + firstHomeIntent) */
+  kiwiSaverWithdrawal?: boolean;
+  inflationOverride?: number;
+  kiwiSaverReturnOverride?: number;
 }
 
-// Sale-cost and LVR-cap assumptions used when restructuring on a sale.
-// These mirror the Blueprint modelling policy (lib/rules/lenderPolicies.ts);
-// kept as named constants here so the scenario layer stays context-free.
-const SALE_AGENT_FEE_RATE = 0.03;
-const SALE_LEGAL_FEE = 1500;
-const MAX_LVR_OWNER_OCCUPIED = 0.8;
-const MAX_LVR_INVESTMENT = 0.7;
+// Sale-cost and LVR-cap assumptions used when restructuring on a sale —
+// read from the versioned rule sets so no magic numbers live here.
+import { MODELLING } from '../rules/assumptions';
+import { BLUEPRINT_MODELLING_POLICY } from '../rules/lenderPolicies';
+
+const SALE_AGENT_FEE_RATE = MODELLING.saleAgentFeeRate;
+const SALE_LEGAL_FEE = MODELLING.saleLegalFee;
+const MAX_LVR_OWNER_OCCUPIED = BLUEPRINT_MODELLING_POLICY.lvrPolicy.ownerOccupiedMax;
+const MAX_LVR_INVESTMENT = BLUEPRINT_MODELLING_POLICY.lvrPolicy.investmentMax;
 
 let uid = 0;
 const nextId = (p: string) => `${p}-scn-${++uid}`;
@@ -47,6 +59,7 @@ export function applyScenario(baseline: Client, changes: ScenarioChange[]): Scen
     kiwiSaverRateOverrides: {},
     soldPropertyProceeds: 0,
     notes: [],
+    ownershipCosts: {},
   };
 
   for (const c of changes) {
@@ -249,6 +262,73 @@ export function applyScenario(baseline: Client, changes: ScenarioChange[]): Scen
           state.notes.push(
             `${c.sourceName ?? 'Valuation'} of $${Math.round(c.value).toLocaleString()} recorded for ${target.nickname}${c.useAsActive !== false ? ' and used for modelling' : ''}.`,
           );
+        }
+        break;
+      }
+      case 'setIncome': {
+        const app = client.applicants[c.applicantIndex];
+        if (app) {
+          const line = (c.incomeId && app.incomes.find((i) => i.id === c.incomeId)) ?? app.incomes.find((i) => i.kind === 'salary') ?? app.incomes[0];
+          if (line) line.grossAnnual = c.grossAnnual;
+        }
+        break;
+      }
+      case 'addGrossIncome': {
+        const app = client.applicants[c.applicantIndex ?? 0];
+        if (app) {
+          app.incomes.push({
+            id: nextId('inc'),
+            kind: c.incomeKind,
+            label: c.label,
+            grossAnnual: c.grossAnnual,
+            kiwiSaverRate: 0,
+          });
+        }
+        break;
+      }
+      case 'setStressRate': state.stressRateOverride = c.value; break;
+      case 'setLoanTerm': state.loanTermYearsOverride = c.years; break;
+      case 'setLowEquityMargin': state.lowEquityMarginOverride = c.value; break;
+      case 'setOwnershipCost': {
+        if (c.item === 'rates') state.ownershipCosts.ratesMonthly = c.monthly;
+        else if (c.item === 'insurance') state.ownershipCosts.insuranceMonthly = c.monthly;
+        else state.ownershipCosts.otherMonthly = c.monthly;
+        break;
+      }
+      case 'setCashback': state.cashbackOverride = { amount: c.amount, retentionMonths: c.retentionMonths }; break;
+      case 'kiwiSaverLumpSum': {
+        const acc = client.kiwiSaverAccounts[c.applicantIndex ?? 0] ?? client.kiwiSaverAccounts[0];
+        if (acc) {
+          acc.balance = { ...acc.balance, value: acc.balance.value + c.amount, note: `Includes scenario lump sum of $${Math.round(c.amount).toLocaleString()}` };
+          if (c.fromCash !== false) {
+            const drawn = Math.min(client.cashSavings.value, c.amount);
+            client.cashSavings = { ...client.cashSavings, value: client.cashSavings.value - drawn };
+            if (drawn < c.amount) state.notes.push(`Cash savings only covered $${Math.round(drawn).toLocaleString()} of the $${Math.round(c.amount).toLocaleString()} KiwiSaver lump sum — remainder assumed from elsewhere.`);
+          }
+        }
+        break;
+      }
+      case 'setKiwiSaverWithdrawal': state.kiwiSaverWithdrawal = c.on; break;
+      case 'setInflation': state.inflationOverride = c.value; break;
+      case 'setRetirementAge': client.retirement.targetAge = c.age; break;
+      case 'setKiwiSaverReturn': state.kiwiSaverReturnOverride = c.value; break;
+      case 'setCreditCardLimit': {
+        const card = (c.debtId && client.otherDebts.find((d) => d.id === c.debtId)) ??
+          client.otherDebts.find((d) => d.kind === 'credit-card' || d.kind === 'store-card');
+        if (card) {
+          if (c.limit <= 0) client.otherDebts = client.otherDebts.filter((d) => d.id !== card.id);
+          else {
+            card.limit = c.limit;
+            card.balance = Math.min(card.balance, c.limit);
+          }
+        }
+        break;
+      }
+      case 'removeDebt': {
+        if (c.debtId) client.otherDebts = client.otherDebts.filter((d) => d.id !== c.debtId);
+        else if (c.debtKind) {
+          const idx = client.otherDebts.findIndex((d) => d.kind === c.debtKind);
+          if (idx >= 0) client.otherDebts.splice(idx, 1);
         }
         break;
       }

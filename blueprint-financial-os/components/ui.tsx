@@ -167,6 +167,154 @@ export function Delta({ value, goodWhen = 'up', format = 'money' }: { value: num
 }
 
 // ---------------------------------------------------------------------------
+// EditableValue — click-to-edit number with an always-available exact field.
+// Sliders/steppers elsewhere pair with this; a slider is never the only way
+// to enter an exact number.
+
+export function EditableValue({
+  value,
+  onCommit,
+  format = 'money',
+  decimals = 0,
+  className = '',
+  size = 'md',
+  suffix,
+  min,
+  max,
+  title,
+  disabled = false,
+}: {
+  value: number;
+  onCommit: (v: number) => void;
+  format?: 'money' | 'percent' | 'plain';
+  decimals?: number;
+  className?: string;
+  size?: 'sm' | 'md' | 'lg';
+  suffix?: string;
+  min?: number;
+  max?: number;
+  title?: string;
+  disabled?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startEdit = () => {
+    if (disabled) return;
+    setText(
+      format === 'percent'
+        ? (value * 100).toFixed(decimals || 2)
+        : format === 'money'
+          ? String(Math.round(value))
+          : String(value),
+    );
+    setEditing(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+  const commit = () => {
+    setEditing(false);
+    const raw = parseFloat(text.replace(/[^0-9.-]/g, ''));
+    if (!isFinite(raw)) return;
+    let v = format === 'percent' ? raw / 100 : raw;
+    if (min !== undefined) v = Math.max(min, v);
+    if (max !== undefined) v = Math.min(max, v);
+    if (Math.abs(v - value) > 1e-9) onCommit(v);
+  };
+
+  const sizes = { sm: 'text-[13px]', md: 'text-[15px]', lg: 'text-[22px]' };
+  if (editing) {
+    return (
+      <span className={`inline-flex items-baseline gap-0.5 ${className}`}>
+        {format === 'money' ? <span className={`num font-semibold ${sizes[size]}`}>$</span> : null}
+        <input
+          ref={inputRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          inputMode="decimal"
+          className={`num w-24 rounded border border-teal-500 bg-white px-1 py-0 font-semibold text-ink outline-none ${sizes[size]}`}
+        />
+        {format === 'percent' ? <span className={`num font-semibold ${sizes[size]}`}>%</span> : null}
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={startEdit}
+      disabled={disabled}
+      title={title ?? (disabled ? undefined : 'Click to edit')}
+      className={`group/ev inline-flex items-baseline gap-1 rounded px-0.5 text-left transition-colors ${disabled ? '' : 'cursor-text hover:bg-aqua-100/70'} ${className}`}
+    >
+      <AnimatedNumber value={value} format={format === 'plain' ? 'plain' : format} decimals={decimals} className={`font-semibold ${sizes[size]}`} />
+      {suffix ? <span className="text-[11px] text-slate-500b">{suffix}</span> : null}
+      {!disabled ? (
+        <span className="translate-y-[-1px] text-[10px] text-teal-500 opacity-0 transition-opacity group-hover/ev:opacity-100">✎</span>
+      ) : null}
+    </button>
+  );
+}
+
+/** WEEKLY / FORTNIGHTLY / MONTHLY display toggle. */
+export type DisplayFrequency = 'weekly' | 'fortnightly' | 'monthly';
+export const FREQ_PER_YEAR: Record<DisplayFrequency, number> = { weekly: 52, fortnightly: 26, monthly: 12 };
+export const FREQ_SHORT: Record<DisplayFrequency, string> = { weekly: 'wk', fortnightly: 'fn', monthly: 'mo' };
+
+export function FreqToggle({
+  value,
+  onChange,
+  size = 'sm',
+}: {
+  value: DisplayFrequency;
+  onChange: (f: DisplayFrequency) => void;
+  size?: 'sm' | 'md';
+}) {
+  return (
+    <span className={`inline-flex overflow-hidden rounded-lg border border-line bg-white ${size === 'sm' ? 'text-[10.5px]' : 'text-[12px]'}`}>
+      {(['weekly', 'fortnightly', 'monthly'] as const).map((f) => (
+        <button
+          key={f}
+          onClick={() => onChange(f)}
+          className={`px-2 py-1 font-semibold uppercase tracking-wide transition-colors ${value === f ? 'bg-navy-900 text-white' : 'text-slate-500b hover:bg-mist'}`}
+        >
+          {f === 'weekly' ? 'Weekly' : f === 'fortnightly' ? 'Fortnightly' : 'Monthly'}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  size = 'md',
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  size?: 'sm' | 'md';
+}) {
+  return (
+    <span className={`inline-flex overflow-hidden rounded-lg border border-line bg-white ${size === 'sm' ? 'text-[11px]' : 'text-[12.5px]'}`}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={`px-3 py-1.5 font-semibold transition-colors ${value === o.value ? 'bg-teal-500 text-white' : 'text-slate-500b hover:bg-mist'}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 export function InfoTip({ children, tip }: { children: ReactNode; tip: string }) {
   return (
