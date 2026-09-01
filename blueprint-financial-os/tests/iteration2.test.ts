@@ -262,6 +262,24 @@ describe('Iteration 2 supporting mechanics', () => {
     expect(per).toBeLessThan(100);
   });
 
+  it('fixed commitments are itemised in the bank living costs and editable', () => {
+    const base = run(demoFhb, []);
+    // each fixed commitment appears as its own line (PDF feedback: break them down)
+    for (const f of demoFhb.expenses.fixedCommitmentsMonthly) {
+      expect(base.servicing.livingExpenses.items.some((i) => i.label === f.label && Math.abs(i.amount - f.amount) < 0.01)).toBe(true);
+    }
+    const edited = run(demoFhb, [{ kind: 'setFixedCommitment', label: 'Insurances', monthly: 650 }]);
+    const item = edited.servicing.livingExpenses.items.find((i) => i.label === 'Insurances')!;
+    expect(item.amount).toBe(650);
+    expect(edited.servicing.umi).toBeCloseTo(base.servicing.umi + (980 - 650), 1);
+  });
+
+  it('editing a declared expense category flows through the declared totals', () => {
+    const edited = applyScenario(demoFhb, [{ kind: 'setExpenseActual', category: 'Food & groceries', monthly: 1400 }]);
+    expect(edited.client.expenses.declaredMonthly.find((d) => d.category === 'Food & groceries')!.amount).toBe(1400);
+    expect(demoFhb.expenses.declaredMonthly.find((d) => d.category === 'Food & groceries')!.amount).toBe(100); // baseline untouched
+  });
+
   it('amortise matches a closed-form check on a simple loan', () => {
     const res = amortise({ principal: 500_000, annualRate: 0.06, years: 30 });
     expect(res.scheduledPayment).toBeCloseTo(pmt(0.06 / 12, 360, 500_000), 6);

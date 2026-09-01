@@ -431,6 +431,20 @@ export function BankViewSection(props: SectionProps) {
   const sv = result.servicing;
   const testRate = result.effectiveStressRate;
   const termYears = ctx.policy.maxTermYears;
+  // gross → PAYE/ACC → KiwiSaver → net decomposition for block A
+  const payroll = client.applicants.flatMap((a) => a.incomes).reduce(
+    (acc, inc) => {
+      const n = netMonthlyFromSalary(inc.grossAnnual, inc.kiwiSaverRate, ctx.tax, inc.studentLoan);
+      acc.gross += n.grossMonthly;
+      acc.paye += n.payeMonthly + n.accMonthly + n.studentLoanMonthly;
+      acc.ks += n.kiwiSaverMonthly;
+      acc.net += n.netMonthly;
+      return acc;
+    },
+    { gross: 0, paye: 0, ks: 0, net: 0 },
+  );
+  const [incomeDrag, setIncomeDrag] = useState<number | null>(null);
+  const netNow = result.snapshot.actualNetIncomeMonthly;
 
   return (
     <section>
@@ -444,7 +458,14 @@ export function BankViewSection(props: SectionProps) {
         {/* A — NET INCOME */}
         <Card className="p-5">
           <BlockLabel letter="A" title="Net income" note="what the lender counts each month" />
-          <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+          {/* gross → PAYE → KiwiSaver → net, so the deductions are visible */}
+          <div className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-mist px-3 py-2 text-center text-[11.5px]">
+            <div><div className="text-[9.5px] uppercase tracking-wide text-slate-400">Gross pay /mo</div><div className="num font-semibold text-ink">{money(payroll.gross)}</div></div>
+            <div><div className="text-[9.5px] uppercase tracking-wide text-slate-400">PAYE + ACC</div><div className="num font-semibold text-rose-600b">−{money(payroll.paye)}</div></div>
+            <div><div className="text-[9.5px] uppercase tracking-wide text-slate-400">KiwiSaver</div><div className="num font-semibold text-rose-600b">−{money(payroll.ks)}</div></div>
+            <div><div className="text-[9.5px] uppercase tracking-wide text-slate-400">Net pay /mo</div><div className="num font-semibold text-ink">{money(payroll.net)}</div></div>
+          </div>
+          <div className="mt-2 divide-y divide-line rounded-lg border border-line">
             {sv.incomeLines.map((l) => (
               <div key={l.id} className="flex items-center justify-between px-3.5 py-2 text-[13px]">
                 <InfoTip tip={l.why}>{l.label.replace(/ — /, ' · ')}</InfoTip>
@@ -459,19 +480,44 @@ export function BankViewSection(props: SectionProps) {
               <span className="num"><AnimatedNumber value={sv.recognisedIncomeMonthly} />/mo</span>
             </div>
           </div>
-          <p className="mt-2 text-[11.5px] text-slate-500b">Edit any income on the “Where You Are Today” screen — this block follows it live.</p>
+          {!presentation ? (
+            <div className="mt-2.5 flex items-center gap-3">
+              <span className="shrink-0 text-[11px] text-slate-500b">Drag to test an income change:</span>
+              <input
+                type="range"
+                min={Math.round(netNow * 0.6)}
+                max={Math.round(netNow * 1.5)}
+                step={50}
+                value={incomeDrag ?? Math.round(netNow)}
+                onChange={(e) => setIncomeDrag(Number(e.target.value))}
+                onMouseUp={() => { if (incomeDrag) { addChanges(householdNetEdit(client, incomeDrag, ctx.tax)); setIncomeDrag(null); } }}
+                onTouchEnd={() => { if (incomeDrag) { addChanges(householdNetEdit(client, incomeDrag, ctx.tax)); setIncomeDrag(null); } }}
+                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-line accent-[#2ab3b1]"
+              />
+              <EditableValue size="sm" value={incomeDrag ?? netNow} onCommit={(v) => addChanges(householdNetEdit(client, v, ctx.tax))} suffix="/mo net" />
+            </div>
+          ) : null}
         </Card>
 
         {/* B — BANK LIVING COSTS */}
         <Card className="p-5">
           <BlockLabel letter="B" title="Bank living costs" note="benchmark minimums, whatever you declare" />
           <div className="mt-3 divide-y divide-line rounded-lg border border-line">
-            {sv.livingExpenses.items.map((i, idx) => (
-              <div key={idx} className="flex items-center justify-between px-3.5 py-2 text-[13px]">
-                <InfoTip tip={i.note ?? ''}>{i.label}</InfoTip>
-                <span className="num font-semibold">−{money(i.amount)}</span>
-              </div>
-            ))}
+            {sv.livingExpenses.items.map((i, idx) => {
+              const editable = !presentation && client.expenses.fixedCommitmentsMonthly.some((f) => f.label === i.label);
+              return (
+                <div key={idx} className="flex items-center justify-between px-3.5 py-2 text-[13px]">
+                  <InfoTip tip={i.note ?? ''}>{i.label}</InfoTip>
+                  {editable ? (
+                    <span className="num font-semibold">
+                      −<EditableValue size="sm" value={i.amount} onCommit={(v) => addChanges([{ kind: 'setFixedCommitment', label: i.label, monthly: v }])} />
+                    </span>
+                  ) : (
+                    <span className="num font-semibold">−{money(i.amount)}</span>
+                  )}
+                </div>
+              );
+            })}
             <div className="flex items-center justify-between bg-mist px-3.5 py-2.5 text-[13.5px] font-semibold">
               <span>Bank living costs</span>
               <span className="num">−<AnimatedNumber value={sv.livingExpenses.totalMonthly} />/mo</span>
@@ -506,6 +552,13 @@ export function BankViewSection(props: SectionProps) {
               </div>
             ) : null}
           </div>
+          {client.mortgages.length > 0 ? (
+            <div className="mt-2 rounded-lg bg-aqua-100 px-3 py-2 text-[11.5px] leading-relaxed text-navy-800">
+              Actual loan repayments today: <strong className="num">{money(result.snapshot.actualRepaymentsMonthly)}/mo</strong> — the bank
+              ignores that and tests <strong className="num">{money(sv.stressedRepaymentMonthly)}/mo</strong> at the test rate. The gap is the
+              safety margin lenders build in.
+            </div>
+          ) : null}
           {client.otherDebts.some((dd) => dd.kind === 'credit-card' || dd.kind === 'store-card') ? (
             <div className="mt-2 rounded-lg bg-mist px-3 py-2 text-[11.5px] leading-relaxed text-slate-500b">
               {(() => {

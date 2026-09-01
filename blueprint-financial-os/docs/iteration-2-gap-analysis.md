@@ -2,14 +2,12 @@
 
 Audit of the Phase 1 prototype against the Iteration 2 brief, item by item.
 
-> **Note on the feedback PDF.** The Iteration 2 brief references an 8-page PDF of
-> visual feedback and instructs it be read in full before changes. That PDF did
-> not arrive with the message — the uploads directory contains only the ten
-> previously supplied files (two transcripts, two strategy spreadsheets, one
-> Fact Find, five bank calculators). This audit therefore runs against the
-> written 58-section brief, which is detailed enough to implement from. If the
-> PDF contains visual feedback beyond the brief, re-supply it and this document
-> gets a follow-up pass.
+> **Note on the feedback PDF.** The PDF did not arrive with the original
+> Iteration 2 message, so the first pass ran against the written 58-section
+> brief. The PDF was supplied afterwards and reconciled in full — see
+> **PDF reconciliation** at the end of this document. The brief turned out to
+> be a faithful expansion of the PDF; the reconciliation pass closed the six
+> page-level details the brief had not fully carried over.
 
 Status legend: **DONE** (already correct in Phase 1) · **PARTIAL** (exists but
 falls short) · **MISSING** (not built) · → all PARTIAL/MISSING items are
@@ -247,3 +245,26 @@ implemented in this iteration.
 ## 31. Missing source data (§55) & domain corrections (§56)
 
 - **STATUS**: `/docs/data-required-from-blueprint.md` written this iteration. Domain corrections verified: card % is per-policy (3–5% from the calculators, adviser-configurable), test rate is per-policy and now scenario-editable, $5k/36mo/pro-rata cashback ships as a labelled configurable example, no Morningstar/Milford/insurance averages are fabricated anywhere, and no "over-insured" wording exists (needs analysis says "potential surplus … specialist review").
+
+---
+
+## PDF reconciliation (feedback PDF supplied after the first pass)
+
+Each annotation in the 8-page PDF, against the build:
+
+| PDF annotation | Status |
+|---|---|
+| Explain Akahu under homeowner/investor; direct access to load the data (not statements) | DONE — "Connect financial data" card renders for every client type; copy explains the one-off account-information flow and the access model (personal test connections free; client connections need Blueprint's commercial Akahu app — Akahu charges the business, not the client) |
+| Pick FHB / existing homeowner / property investor and the numbers populate | DONE — editable strategy selector over one shared financial core |
+| Deposit and income separated; KiwiSaver / cash / gift editable on the page; net income editable, pre-populated via Akahu; expenses editable via Akahu | DONE — deposit stack fully editable; net income click-to-edit (gross re-solved through PAYE); **expense amounts now editable in place** (reconciliation pass): the Akahu-actual cell adjusts forward modelling without rewriting feed data, the Fact Find cell edits the declared figure |
+| Actual in red, benchmark on the right, Akahu-detected income, yellow-box notes for high categories | DONE — restrained red only when materially above benchmark; per-category observations in note boxes |
+| Bank view: table style with a drag bar for net income; show KiwiSaver and PAYE removed; benchmark + broken-down fixed commitments; 4% card; actual loan repayments before the surplus; surplus = repayment at the test rate; fixed expenses manually changeable; boarder/rent addable everywhere with scaling shown; no double hyphens; outliers listed | DONE — reconciliation pass added: gross → PAYE+ACC → KiwiSaver → net strip, a drag bar paired with the exact field, **fixed commitments itemised line by line and editable**, and an explicit actual-vs-stressed repayment callout in block C. Card % is policy-driven (3–5% per verified calculator), test rate editable |
+| Comfortable vs maximum interchangeable; repayments over the life of the mortgage at ~6% assumption; weekly/fortnightly/monthly; boarder / cancel-cards with live borrowing change | DONE — custom amount editable, frequency toggle, live levers with before → after; demo FHB client rate set to the requested 6% default (editable, labelled as an assumption) |
+| Deposit changeable with live loan; editable low-equity margin and effective rate; fortnightly repayments; tiers as "unlocked"; save scenario feeding the client email | DONE — plus the saved-scenario table lands in the generated summary |
+| Under-20% cashback $5,000 pro-rata over 3 years; explain payback and when it arrives | DONE — modelled as a labelled configurable offer (per the brief's own domain correction that cashback is never a universal entitlement), with payment timing and a clawback timeline |
+| Timeline: KiwiSaver-heavy deposits need the signed S&P + ~9 working days; conditions (finance, building report, LIM, solicitor); unsigned S&Ps increase legal costs; $150/mo insurance + $350/mo rates in cost of ownership | DONE — all present, plain-English, with the KiwiSaver timing dependency highlighted automatically when it dominates the deposit |
+| Future trajectory: scenario when KiwiSaver is emptied; inflation-adjusted "worth today at 65"; contribution and fund-type options with Morningstar/Milford figures | DONE for the mechanics (withdrawal event, nominal vs today's dollars, contribution/lump-sum/return controls, Cash→Aggressive comparison). Data source follows the brief's own correction: labelled long-term category assumptions with the past-performance disclaimer; the Morningstar adapter activates when a licensed feed is supplied — one provider's historic returns are never presented as a national average |
+| Protection: premiums listed; national-average comparison, over-insured flag; prompt adviser if health/life high | DONE for premiums + prompts. Per the brief's correction, no fabricated national average and no over-insured verdict from premium alone — ratio-based flags plus the exact adviser prompts, with the dataset seam ready if credible NZ data is licensed |
+| Blueprint page: map cashflow → benchmark → repayments → stress test → surplus at the test rate; FHB purchase at various amounts; extra payments → mortgage-free year **and the KiwiSaver balance at that time**; benefits/risks/considerations + insights per type; post-meeting summary | DONE — reconciliation pass added the KiwiSaver-at-mortgage-free row to the FHB blueprint |
+| "Model it" as an AI chat using bank policies and KiwiSaver compounding, making real changes | DONE — Blueprint Copilot chat mutates real scenario state through structured actions and answers policy questions only from the verified calculators. Send further bank policy documents and they join the knowledge base (see docs/data-required-from-blueprint.md for the list) |
+| Snapshot clearer, showing the blueprint vs "what they could be at their best" | DONE — reconciliation pass added the "At your best" column: the current scenario with every open opportunity applied, computed deterministically from the same opportunity actions the cards model |

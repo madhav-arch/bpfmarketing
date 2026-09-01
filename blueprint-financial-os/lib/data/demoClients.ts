@@ -116,7 +116,9 @@ export const demoFhb: Client = {
     boarderCount: 1,
   },
   retirement: { targetAge: 65, desiredAnnualIncome: 80_000 },
-  modellingRate: 0.0499,
+  // ~6% default client repayment demonstration assumption (adviser feedback);
+  // editable live and clearly labelled as an assumption in the UI.
+  modellingRate: 0.06,
 };
 
 // ---------------------------------------------------------------------------

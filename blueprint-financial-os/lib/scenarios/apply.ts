@@ -324,6 +324,22 @@ export function applyScenario(baseline: Client, changes: ScenarioChange[]): Scen
         }
         break;
       }
+      case 'setFixedCommitment': {
+        const item = client.expenses.fixedCommitmentsMonthly.find((f) => f.label.toLowerCase() === c.label.toLowerCase());
+        if (item) item.amount = c.monthly;
+        else client.expenses.fixedCommitmentsMonthly.push({ label: c.label, amount: c.monthly });
+        break;
+      }
+      case 'setExpenseActual': {
+        // Adjust forward modelling for a category's actual spend: the delta
+        // between the adviser's figure and the declared figure feeds the
+        // living-cost line (feed averages themselves are source data and are
+        // not rewritten — provenance stays intact).
+        const declared = client.expenses.declaredMonthly.find((d) => d.category.toLowerCase() === c.category.toLowerCase());
+        if (declared) declared.amount = c.monthly;
+        else client.expenses.declaredMonthly.push({ category: c.category, amount: c.monthly });
+        break;
+      }
       case 'removeDebt': {
         if (c.debtId) client.otherDebts = client.otherDebts.filter((d) => d.id !== c.debtId);
         else if (c.debtKind) {

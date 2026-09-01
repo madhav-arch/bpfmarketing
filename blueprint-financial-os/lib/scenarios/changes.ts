@@ -48,7 +48,9 @@ export type ScenarioChange =
   | { kind: 'setRetirementAge'; age: number }
   | { kind: 'setCreditCardLimit'; debtId?: string; limit: number }
   | { kind: 'removeDebt'; debtId?: string; debtKind?: 'personal-loan' | 'credit-card' | 'store-card' | 'other' }
-  | { kind: 'setKiwiSaverReturn'; value: number };
+  | { kind: 'setKiwiSaverReturn'; value: number }
+  | { kind: 'setFixedCommitment'; label: string; monthly: number }
+  | { kind: 'setExpenseActual'; category: string; monthly: number };
 
 const frequency = z.enum(['weekly', 'fortnightly', 'monthly', 'annual']);
 
@@ -120,6 +122,8 @@ export const scenarioChangeSchema: z.ZodType<ScenarioChange> = z.discriminatedUn
   z.object({ kind: z.literal('setCreditCardLimit'), debtId: z.string().optional(), limit: z.number().min(0) }),
   z.object({ kind: z.literal('removeDebt'), debtId: z.string().optional(), debtKind: z.enum(['personal-loan', 'credit-card', 'store-card', 'other']).optional() }),
   z.object({ kind: z.literal('setKiwiSaverReturn'), value: z.number().min(-0.02).max(0.12) }),
+  z.object({ kind: z.literal('setFixedCommitment'), label: z.string(), monthly: z.number().min(0) }),
+  z.object({ kind: z.literal('setExpenseActual'), category: z.string(), monthly: z.number().min(0) }),
 ]);
 
 /** Human-readable chip label for a proposed change. */
@@ -163,5 +167,7 @@ export function describeChange(c: ScenarioChange): string {
     case 'setCreditCardLimit': return `Card limit → ${fmt(c.limit)}`;
     case 'removeDebt': return c.debtKind ? `Remove ${c.debtKind.replace('-', ' ')}` : 'Remove debt';
     case 'setKiwiSaverReturn': return `KiwiSaver return → ${(c.value * 100).toFixed(1)}%/yr`;
+    case 'setFixedCommitment': return `${c.label} → ${fmt(c.monthly)}/mo`;
+    case 'setExpenseActual': return `${c.category} spend → ${fmt(c.monthly)}/mo`;
   }
 }

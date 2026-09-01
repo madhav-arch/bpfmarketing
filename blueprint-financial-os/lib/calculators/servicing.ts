@@ -177,11 +177,16 @@ export function computeServicing(
       note: `$${bench.perDependant}/month per dependant for essentials.`,
     });
   }
-  livingItems.push({
-    label: 'Fixed commitments (from statements)',
-    amount: fixed,
-    note: 'Insurances, rates, childcare, subscriptions — the direct debits the lender finds in your statements.',
-  });
+  // Fixed commitments broken down line by line — each is adviser-editable in
+  // the UI (the lender finds these as direct debits in the statements).
+  for (const f of client.expenses.fixedCommitmentsMonthly) {
+    livingItems.push({
+      label: f.label,
+      amount: f.amount,
+      note: 'Fixed commitment from statements — editable; the lender adds these on top of the benchmark.',
+    });
+  }
+  void fixed;
   if (opts.livingCostDeltaMonthly) {
     livingItems.push({
       label: 'Scenario adjustment to living costs',
@@ -202,11 +207,17 @@ export function computeServicing(
     (s, m) => s + pmt(Math.max(policy.stressRate, m.rate) / 12, stressPeriods, m.balance),
     0,
   );
+  const actualRepaymentsMonthly = client.mortgages.reduce((s, m) => {
+    const perYear = { weekly: 52, fortnightly: 26, monthly: 12, annual: 1 }[m.repayment.frequency];
+    return s + (m.repayment.amount * perYear) / 12;
+  }, 0);
   if (mortgageDebt > 0) {
     debtItems.push({
       label: 'Existing mortgages (stress-tested)',
       amount: stressedRepaymentMonthly,
-      note: `Repayment on $${Math.round(mortgageDebt).toLocaleString()} at ${(policy.stressRate * 100).toFixed(2)}%${policy.stressRateIsFloor ? ' (floor — actual rate if higher)' : ''} over ${policy.maxTermYears} years — the rate the lender tests, not the rate you pay.`,
+      note:
+        `Actual repayments are $${Math.round(actualRepaymentsMonthly).toLocaleString()}/mo; the lender instead tests $${Math.round(mortgageDebt).toLocaleString()} at ` +
+        `${(policy.stressRate * 100).toFixed(2)}%${policy.stressRateIsFloor ? ' (floor — actual rate if higher)' : ''} over ${policy.maxTermYears} years — the rate the lender tests, not the rate you pay.`,
     });
   }
   let cardLimits = 0;

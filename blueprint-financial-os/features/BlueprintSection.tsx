@@ -125,8 +125,9 @@ export function BlueprintSection(props: BlueprintProps) {
         }
       />
 
-      {/* TODAY vs YOUR BLUEPRINT snapshot */}
-      <SnapshotTable {...props} />
+      {/* TODAY vs YOUR BLUEPRINT snapshot (plus "at your best" when open
+          opportunities exist — baseline + every opportunity applied) */}
+      <SnapshotTable {...props} insights={insights} />
 
       {/* Per-client-type blueprint blocks */}
       <div className="mt-4">
@@ -273,53 +274,101 @@ export function BlueprintSection(props: BlueprintProps) {
 }
 
 // ---------------------------------------------------------------------------
-// TODAY vs YOUR BLUEPRINT — explicit timeframes on every row.
+// TODAY vs YOUR BLUEPRINT — explicit timeframes on every row, plus an
+// optional "at your best" column: the current scenario with every open
+// opportunity applied (deterministic — the same changes the cards model).
 
-function SnapshotTable({ client, result, baseline, scenarioName }: BlueprintProps) {
-  const rows: { label: string; timeframe: string; today: string; blueprint: string; better?: boolean }[] = [];
-  const push = (label: string, timeframe: string, today: string, blueprint: string, better?: boolean) =>
-    rows.push({ label, timeframe, today, blueprint, better });
+function SnapshotTable({ client, result, baseline, scenarioName, computePreview, insights }: BlueprintProps & { insights: Insight[] }) {
+  const bestChanges = useMemo(
+    () => insights.filter((i) => i.severity === 'opportunity').flatMap((i) => opportunityAction(i, result) ?? []),
+    [insights, result],
+  );
+  const best = useMemo(() => (bestChanges.length > 0 ? computePreview(bestChanges) : undefined), [bestChanges, computePreview]);
+  return <SnapshotTableInner client={client} result={result} baseline={baseline} scenarioName={scenarioName} best={best} />;
+}
 
-  push('Net worth', 'today', moneyShort(baseline.snapshot.netWorth), moneyShort(result.snapshot.netWorth), result.snapshot.netWorth > baseline.snapshot.netWorth + 1000);
-  if (client.mortgages.length > 0 || result.fhb) {
-    push(
-      'Mortgage-free',
-      'projected',
-      baseline.snapshot.mortgageFreeYear ? `${baseline.snapshot.mortgageFreeYear}` : result.fhb ? '—' : 'IO — no path',
-      result.snapshot.mortgageFreeYear
-        ? `${result.snapshot.mortgageFreeYear}`
-        : result.fhb && result.amortisation.blueprint.paidOff
-          ? `${result.amortisation.blueprint.payoffYear}`
-          : 'IO — no path',
-      (result.snapshot.mortgageFreeYear ?? 9999) < (baseline.snapshot.mortgageFreeYear ?? 9999),
-    );
+function SnapshotTableInner({
+  client,
+  result,
+  baseline,
+  scenarioName,
+  best,
+}: {
+  client: BlueprintProps['client'];
+  result: CalculationResult;
+  baseline: CalculationResult;
+  scenarioName: string;
+  best?: CalculationResult;
+}) {
+  interface RowDef {
+    label: string;
+    timeframe: string;
+    show?: boolean;
+    get: (r: CalculationResult) => string;
+    num?: (r: CalculationResult) => number;
+    goodWhen?: 'up' | 'down';
   }
-  push('Monthly buffer', 'today', money(baseline.snapshot.monthlySurplus), money(result.snapshot.monthlySurplus), result.snapshot.monthlySurplus > baseline.snapshot.monthlySurplus + 40);
-  push(
-    'Borrowing capacity',
-    'today, indicative',
-    `${moneyShort(baseline.snapshot.maxLendingRange.min)}–${moneyShort(baseline.snapshot.maxLendingRange.max)}`,
-    `${moneyShort(result.snapshot.maxLendingRange.min)}–${moneyShort(result.snapshot.maxLendingRange.max)}`,
-    result.snapshot.maxLendingRange.max > baseline.snapshot.maxLendingRange.max + 5000,
-  );
-  if (baseline.snapshot.usableEquity > 0 || result.snapshot.usableEquity > 0) {
-    push('Usable equity', 'today', moneyShort(baseline.snapshot.usableEquity), moneyShort(result.snapshot.usableEquity), result.snapshot.usableEquity > baseline.snapshot.usableEquity + 1000);
-  }
-  push(
-    `KiwiSaver at ${client.retirement.targetAge}`,
-    `nominal, ${result.retirement.yearsToRetirement} yrs out`,
-    moneyShort(baseline.snapshot.kiwiSaverProjected),
-    moneyShort(result.snapshot.kiwiSaverProjected),
-    result.snapshot.kiwiSaverProjected > baseline.snapshot.kiwiSaverProjected + 2000,
-  );
-  push(
-    'Retirement income',
-    "today's dollars, at retirement",
-    `${money(baseline.retirement.projectedAnnualIncomeToday)}/yr`,
-    `${money(result.retirement.projectedAnnualIncomeToday)}/yr`,
-    result.retirement.projectedAnnualIncomeToday > baseline.retirement.projectedAnnualIncomeToday + 300,
-  );
-  push('Protection', 'today', baseline.snapshot.protectionIssues > 0 ? `${baseline.snapshot.protectionIssues} to review` : 'Reviewed', result.snapshot.protectionIssues > 0 ? `${result.snapshot.protectionIssues} to review` : 'Reviewed');
+  const allRows: RowDef[] = [
+    { label: 'Net worth', timeframe: 'today', get: (r) => moneyShort(r.snapshot.netWorth), num: (r) => r.snapshot.netWorth, goodWhen: 'up' },
+    {
+      label: 'Mortgage-free',
+      timeframe: 'projected',
+      show: client.mortgages.length > 0 || !!result.fhb,
+      get: (r) =>
+        r.snapshot.mortgageFreeYear
+          ? `${r.snapshot.mortgageFreeYear}`
+          : r.fhb && r.amortisation.blueprint.paidOff
+            ? `${r.amortisation.blueprint.payoffYear}`
+            : r.fhb
+              ? '—'
+              : 'IO — no path',
+      num: (r) => r.snapshot.mortgageFreeYear ?? (r.fhb && r.amortisation.blueprint.paidOff ? r.amortisation.blueprint.payoffYear : 9999),
+      goodWhen: 'down',
+    },
+    { label: 'Monthly buffer', timeframe: 'today', get: (r) => money(r.snapshot.monthlySurplus), num: (r) => r.snapshot.monthlySurplus, goodWhen: 'up' },
+    {
+      label: 'Borrowing capacity',
+      timeframe: 'today, indicative',
+      get: (r) => `${moneyShort(r.snapshot.maxLendingRange.min)}–${moneyShort(r.snapshot.maxLendingRange.max)}`,
+      num: (r) => r.snapshot.maxLendingRange.max,
+      goodWhen: 'up',
+    },
+    {
+      label: 'Usable equity',
+      timeframe: 'today',
+      show: baseline.snapshot.usableEquity > 0 || result.snapshot.usableEquity > 0,
+      get: (r) => moneyShort(r.snapshot.usableEquity),
+      num: (r) => r.snapshot.usableEquity,
+      goodWhen: 'up',
+    },
+    {
+      label: `KiwiSaver at ${client.retirement.targetAge}`,
+      timeframe: `nominal, ${result.retirement.yearsToRetirement} yrs out`,
+      get: (r) => moneyShort(r.snapshot.kiwiSaverProjected),
+      num: (r) => r.snapshot.kiwiSaverProjected,
+      goodWhen: 'up',
+    },
+    {
+      label: 'Retirement income',
+      timeframe: "today's dollars, at retirement",
+      get: (r) => `${money(r.retirement.projectedAnnualIncomeToday)}/yr`,
+      num: (r) => r.retirement.projectedAnnualIncomeToday,
+      goodWhen: 'up',
+    },
+    {
+      label: 'Protection',
+      timeframe: 'today',
+      get: (r) => (r.snapshot.protectionIssues > 0 ? `${r.snapshot.protectionIssues} to review` : 'Reviewed'),
+    },
+  ];
+  const rows = allRows.filter((r) => r.show !== false);
+
+  const betterOf = (r: RowDef, a: CalculationResult, b: CalculationResult) => {
+    if (!r.num || !r.goodWhen) return false;
+    const d = r.num(b) - r.num(a);
+    const threshold = r.label === 'Mortgage-free' ? 0.4 : r.label === 'Monthly buffer' ? 40 : r.label === 'Retirement income' ? 300 : 1000;
+    return r.goodWhen === 'up' ? d > threshold : d < -threshold;
+  };
 
   return (
     <Card className="overflow-hidden">
@@ -330,23 +379,37 @@ function SnapshotTable({ client, result, baseline, scenarioName }: BlueprintProp
             <th className="px-3 py-2.5 font-medium">Timeframe</th>
             <th className="px-3 py-2.5 text-right font-medium">Today (baseline)</th>
             <th className="px-3 py-2.5 text-right font-medium">Your Blueprint · {scenarioName}</th>
+            {best ? <th className="px-3 py-2.5 text-right font-medium text-teal-500">At your best**</th> : null}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.label} className="border-b border-line/60">
-              <td className="px-4 py-2 font-medium text-ink">{r.label}</td>
-              <td className="px-3 py-2 text-[11px] text-slate-400">{r.timeframe}</td>
-              <td className="num px-3 py-2 text-right text-slate-500b">{r.today}</td>
-              <td className={`num px-3 py-2 text-right font-semibold ${r.better ? 'text-green-600b' : 'text-ink'}`}>
-                {r.blueprint}
-                {r.blueprint !== r.today ? <span className="ml-1 text-[10px] text-slate-400">*</span> : null}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const today = r.get(baseline);
+            const bp = r.get(result);
+            const bestVal = best ? r.get(best) : undefined;
+            return (
+              <tr key={r.label} className="border-b border-line/60">
+                <td className="px-4 py-2 font-medium text-ink">{r.label}</td>
+                <td className="px-3 py-2 text-[11px] text-slate-400">{r.timeframe}</td>
+                <td className="num px-3 py-2 text-right text-slate-500b">{today}</td>
+                <td className={`num px-3 py-2 text-right font-semibold ${betterOf(r, baseline, result) ? 'text-green-600b' : 'text-ink'}`}>
+                  {bp}
+                  {bp !== today ? <span className="ml-1 text-[10px] text-slate-400">*</span> : null}
+                </td>
+                {best ? (
+                  <td className={`num px-3 py-2 text-right font-semibold ${betterOf(r, result, best) ? 'text-green-600b' : 'text-slate-500b'}`}>
+                    {bestVal}
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-      <div className="px-4 py-2 text-[10.5px] text-slate-500b">*projected according to the selected scenario and its stated assumptions — indicative, not guaranteed.</div>
+      <div className="px-4 py-2 text-[10.5px] text-slate-500b">
+        *projected according to the selected scenario and its stated assumptions — indicative, not guaranteed.
+        {best ? ' **the current scenario with every open opportunity below applied — a modelled direction, not advice.' : ''}
+      </div>
     </Card>
   );
 }
@@ -391,6 +454,17 @@ function FhbBlueprint({ result, baseline, ctx }: BlueprintProps) {
         <div className="mt-2 text-[11px] leading-snug text-slate-500b">Try +$50/wk or +$500/fn on the first-home screen — the whole column updates.</div>
       </BlockCard>
       <BlockCard title="Long term" step={4}>
+        {opt.blueprint.paidOff ? (
+          <BRow
+            label={`KiwiSaver at mortgage-free (~${opt.blueprint.payoffYear})`}
+            value={`${moneyShort(
+              result.kiwiSaverProjections.reduce((s, p) => {
+                const y = Math.min(Math.ceil(opt.blueprint.termYears), p.base.balances.length - 1);
+                return s + (p.base.balances[y]?.balance ?? 0);
+              }, 0),
+            )} nominal`}
+          />
+        ) : null}
         <BRow label={`KiwiSaver at ${result.retirement.retirementYear}`} value={`${moneyShort(result.retirement.projectedKiwiSaver)} nominal`} />
         <BRow label="…in today's dollars" value={moneyShort(result.retirement.projectedKiwiSaverToday)} />
         <BRow label="Net worth at retirement" value={`${moneyShort(result.retirement.projectedNetWorth)} nominal`} />

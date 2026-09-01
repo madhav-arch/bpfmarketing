@@ -18,7 +18,7 @@ import {
   type FeedAnalysis,
 } from '@/lib/calculators/cashflow';
 import type { LenderPolicy } from '@/lib/rules/types';
-import { Card, Pill } from '@/components/ui';
+import { Card, Pill, EditableValue } from '@/components/ui';
 import { money, moneyShort } from '@/lib/format';
 import type { ScenarioChange } from '@/lib/scenarios/changes';
 
@@ -83,17 +83,24 @@ export function LiveDataPanel({
   const [valProperty, setValProperty] = useState(client.properties[0]?.id ?? '');
   const [rowMarks, setRowMarks] = useState<Record<string, RowMark>>({});
   const [excludedOutliers, setExcludedOutliers] = useState<Record<string, boolean>>({});
+  const [actualEdits, setActualEdits] = useState<Record<string, number>>({});
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
   const outliers = useMemo(() => detectOutliers(feed.snapshot), [feed.snapshot]);
-  // Excluded outliers reduce the AKAHU ACTUAL averages deterministically.
+  // Excluded outliers reduce the AKAHU ACTUAL averages deterministically, and
+  // adviser edits to the actual figure adjust the same map (the raw feed data
+  // itself is never rewritten — provenance stays intact).
   const excludedMonthlyByCategory = useMemo(() => {
     const map: Record<string, number> = {};
     for (const o of outliers) {
       if (excludedOutliers[o.id]) map[o.likelyCategory] = (map[o.likelyCategory] ?? 0) + o.amount / Math.max(1, a.monthsCovered);
     }
+    for (const [cat, edited] of Object.entries(actualEdits)) {
+      const raw = a.spendByCategory.find((c) => c.category === cat)?.monthlyAverage ?? 0;
+      map[cat] = (map[cat] ?? 0) + (raw - edited);
+    }
     return map;
-  }, [outliers, excludedOutliers, a.monthsCovered]);
+  }, [outliers, excludedOutliers, actualEdits, a]);
 
   const table = useMemo(
     () => threeWayExpenseTable(a, client, policy, netIncomeMonthly, { excludedMonthlyByCategory }),
@@ -156,9 +163,41 @@ export function LiveDataPanel({
                       ) : null}
                     </td>
                     <td className={`num py-2 pr-3 text-right font-semibold ${overBench ? 'text-rose-600b' : 'text-ink'}`}>
-                      {r.akahuActualMonthly !== undefined ? `${money(r.akahuActualMonthly)}` : '—'}
+                      {r.akahuActualMonthly !== undefined ? (
+                        presentation ? (
+                          money(r.akahuActualMonthly)
+                        ) : (
+                          <EditableValue
+                            size="sm"
+                            value={r.akahuActualMonthly}
+                            className={overBench ? 'text-rose-600b' : ''}
+                            title="Edit the amount used for forward modelling — the raw feed data is kept"
+                            onCommit={(v) => {
+                              addChanges([{ kind: 'setLivingCostDelta', monthly: v - (r.akahuActualMonthly ?? 0), label: `${r.category} spend adjusted by adviser` }]);
+                              setActualEdits((p) => ({ ...p, [r.category]: v }));
+                            }}
+                          />
+                        )
+                      ) : (
+                        '—'
+                      )}
                     </td>
-                    <td className="num py-2 pr-3 text-right text-slate-500b">{r.factFindMonthly !== undefined ? money(r.factFindMonthly) : '—'}</td>
+                    <td className="num py-2 pr-3 text-right text-slate-500b">
+                      {r.factFindMonthly !== undefined ? (
+                        presentation ? (
+                          money(r.factFindMonthly)
+                        ) : (
+                          <EditableValue
+                            size="sm"
+                            value={r.factFindMonthly}
+                            title="Edit the declared (Fact Find) figure"
+                            onCommit={(v) => addChanges([{ kind: 'setExpenseActual', category: r.category, monthly: v }])}
+                          />
+                        )
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="num py-2 pr-3 text-right text-slate-500b">{r.benchmarkMonthly !== undefined ? money(r.benchmarkMonthly) : '—'}</td>
                     <td className={`num py-2 pr-3 text-right font-semibold ${overBench ? 'text-rose-600b' : (r.differenceVsBenchmark ?? 0) < -0.3 ? 'text-green-600b' : 'text-slate-400'}`}>
                       {r.differenceVsBenchmark !== undefined ? `${r.differenceVsBenchmark >= 0 ? '+' : '−'}${Math.round(Math.abs(r.differenceVsBenchmark) * 100)}% vs benchmark` : '—'}
@@ -390,8 +429,10 @@ export function LiveDataPanel({
               <li>3. The data lands here categorised; you and your adviser confirm the classifications together</li>
             </ol>
             <p className="mt-2 text-[10.5px] leading-relaxed text-navy-800/60">
-              Local setup: tokens in .env.local, then `npm run sync:akahu` or run the dev server for the live route. See docs/data-sources.md.
-              CSV import and manual entry are available through the same provider seam when a client prefers not to connect.
+              Access model: connecting your own accounts for testing is free (Akahu personal app). Client connections in production run through a
+              registered Akahu app under a commercial agreement — Akahu charges the business, never the client. Local setup: tokens in
+              .env.local, then `npm run sync:akahu` or run the dev server for the live route (docs/data-sources.md). CSV import and manual entry
+              are available through the same provider seam when a client prefers not to connect.
             </p>
           </Card>
         </div>
