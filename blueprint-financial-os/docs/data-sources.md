@@ -73,3 +73,30 @@ for regulated advice). So the prototype does what a compliant build should:
 | Mortgage balances/rates | Fact Find + Akahu loan accounts (reconciliation) | Akahu; lender API where available |
 | Property values | Adviser-entered with provenance (bank AVM, QV E-Valuer, RV) | QV/CoreLogic agreement → automated AVM pulls |
 | KiwiSaver balances | Fact Find / provider statements | Akahu (KiwiSaver account type) where connected |
+
+## One-off application flow (apply.akahu.nz)
+
+The production-shaped path for client data collection, discovered viable in
+testing (the adviser created an applicant and received an invite link):
+
+1. Adviser creates an **applicant** in the Akahu dashboard (or via API) →
+   Akahu generates an invite link (`https://apply.akahu.nz/submit?token=…`).
+2. The client opens the link, chooses banks/accounts, authorises a **one-off
+   account information share** and submits. Blueprint never sees bank logins.
+3. The completed application lands in the business's Akahu dashboard and is
+   retrievable by API using the **app credentials** (app ID token + app
+   secret) — no per-user bearer token, because consent lives in the
+   application record.
+4. Blueprint's server route retrieves → `mapAkahuSnapshot` (PII redaction) →
+   `FeedSnapshot` → the client file.
+
+Status in this prototype: the invite is tracked per client on the connect
+card (link + status: invite created / sent / completed / imported), and the
+collected data round-trips today via dashboard export → the Import button.
+Automatic retrieval (steps 3–4 as code) needs outbound access to
+`api.akahu.io` from the build/deploy environment plus the app ID token —
+the exact one-off retrieval endpoints must be confirmed against
+developers.akahu.nz docs (unreachable from the current sandbox) before that
+route is written. Never embed the app secret or invite tokens in browser
+code; treat invite links as sensitive (anyone holding one can complete that
+application).

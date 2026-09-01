@@ -493,8 +493,9 @@ export function LiveDataPanel({
                 snapshot JSON works here today — it stays in this browser only.
               </span>
             </div>
+            <AkahuInvitePanel clientId={client.id} />
             <ol className="mt-3 space-y-1 text-[11.5px] leading-relaxed text-navy-800/80">
-              <li>1. Authorise at Akahu and choose which accounts to share (one-off account information flow)</li>
+              <li>1. The client opens the Akahu invite link, chooses which banks and accounts to share, and submits (a one-off account information share)</li>
               <li>2. Blueprint retrieves the permitted account and transaction data through a server-side route — tokens and credentials never reach the browser, and bank logins are never stored</li>
               <li>3. The data lands here categorised; you and your adviser confirm the classifications together</li>
             </ol>
@@ -507,6 +508,126 @@ export function LiveDataPanel({
           </Card>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Akahu invite tracker — the adviser creates an applicant in the Akahu
+// dashboard (or via API in production), pastes the apply.akahu.nz invite link
+// here against the client file, and sends it. Once the client completes it,
+// the data is exported from the Akahu dashboard and imported above (production
+// wires automatic retrieval through the server route using app credentials —
+// no invite link or token is ever embedded in this page).
+
+const INVITE_KEY = 'bpf-akahu-invites-v1';
+
+interface InviteRecord {
+  link: string;
+  status: 'invite-created' | 'sent-to-client' | 'client-completed' | 'data-imported';
+  updatedAt: string;
+}
+
+function loadInvites(): Record<string, InviteRecord> {
+  try {
+    return JSON.parse(localStorage.getItem(INVITE_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+const INVITE_STATUS_LABELS: Record<InviteRecord['status'], string> = {
+  'invite-created': 'Invite created',
+  'sent-to-client': 'Sent to client',
+  'client-completed': 'Client completed',
+  'data-imported': 'Data imported',
+};
+
+function AkahuInvitePanel({ clientId }: { clientId: string }) {
+  const [invites, setInvites] = useState<Record<string, InviteRecord>>({});
+  const [linkText, setLinkText] = useState('');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setInvites(loadInvites()), []);
+  const record = invites[clientId];
+
+  const save = (next: Record<string, InviteRecord>) => {
+    setInvites(next);
+    try {
+      localStorage.setItem(INVITE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage blocked — session-only */
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-navy-800/20 bg-white/60 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-navy-800/80">Akahu invite for this client</span>
+        {record ? (
+          <select
+            value={record.status}
+            onChange={(e) => save({ ...invites, [clientId]: { ...record, status: e.target.value as InviteRecord['status'], updatedAt: new Date().toISOString() } })}
+            className="rounded-full border border-navy-800/20 bg-white px-2 py-0.5 text-[11px] font-semibold text-navy-800"
+          >
+            {(Object.keys(INVITE_STATUS_LABELS) as InviteRecord['status'][]).map((s) => (
+              <option key={s} value={s}>{INVITE_STATUS_LABELS[s]}</option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+      {record ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <code className="max-w-[260px] truncate rounded bg-mist px-2 py-1 text-[11px] text-slate-500b" title={record.link}>{record.link}</code>
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard?.writeText(record.link);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch { /* clipboard blocked */ }
+            }}
+            className="rounded-lg bg-navy-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-navy-800"
+          >
+            {copied ? '✓ Copied' : 'Copy link for client'}
+          </button>
+          <button
+            onClick={() => {
+              const next = { ...invites };
+              delete next[clientId];
+              save(next);
+            }}
+            className="text-[11px] text-rose-600b hover:underline"
+          >
+            remove
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            value={linkText}
+            onChange={(e) => setLinkText(e.target.value)}
+            placeholder="paste the apply.akahu.nz invite link…"
+            className="w-64 rounded-lg border border-navy-800/20 bg-white px-2.5 py-1.5 text-[11.5px] outline-none focus:border-teal-500"
+          />
+          <button
+            onClick={() => {
+              const link = linkText.trim();
+              if (/^https:\/\/apply\.akahu\.nz\//.test(link)) {
+                save({ ...invites, [clientId]: { link, status: 'invite-created', updatedAt: new Date().toISOString() } });
+                setLinkText('');
+              }
+            }}
+            className="rounded-lg bg-teal-500 px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-teal-400"
+          >
+            Attach invite
+          </button>
+        </div>
+      )}
+      <p className="mt-1.5 text-[10.5px] leading-relaxed text-navy-800/60">
+        Create the applicant in your Akahu dashboard to generate the invite. Treat the link as sensitive — anyone holding it can complete that
+        application. Once the client submits, export the collected data from the Akahu dashboard and use Import above; production retrieves it
+        automatically server-side with the app credentials.
+      </p>
     </div>
   );
 }
