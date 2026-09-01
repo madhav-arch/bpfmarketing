@@ -19,6 +19,7 @@ import {
 } from '@/lib/calculators/cashflow';
 import type { LenderPolicy } from '@/lib/rules/types';
 import { Card, Pill, EditableValue } from '@/components/ui';
+import { parseCsvFeed } from '@/lib/data-sources/providers';
 import { money, moneyShort } from '@/lib/format';
 import type { ScenarioChange } from '@/lib/scenarios/changes';
 
@@ -26,14 +27,33 @@ export interface FeedState {
   snapshot: FeedSnapshot;
   analysis: FeedAnalysis;
   isLive: boolean;
+  /** replace/clear the adviser-imported snapshot (CSV or Akahu JSON) */
+  setImported: (s: FeedSnapshot | null) => void;
+  importedActive: boolean;
 }
 
-/** Load a live Akahu snapshot (server route or pre-synced file) or fall back
- *  to the deterministic demo feed. Tokens never reach this code — the route
- *  holds them server-side. */
+const IMPORTED_FEED_KEY = 'bpf-imported-feed-v1';
+
+function loadImportedFeed(): FeedSnapshot | null {
+  try {
+    const raw = localStorage.getItem(IMPORTED_FEED_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (s && Array.isArray(s.transactions) && Array.isArray(s.accounts)) return s as FeedSnapshot;
+  } catch {
+    /* blocked storage or bad JSON — ignore */
+  }
+  return null;
+}
+
+/** Feed priority: adviser-imported snapshot (CSV / Akahu JSON, stored only in
+ *  this browser) → live Akahu (server route or pre-synced file) → demo feed.
+ *  Tokens never reach this code — the route holds them server-side. */
 export function useFeed(client: Client): FeedState {
   const [live, setLive] = useState<FeedSnapshot | null>(null);
+  const [imported, setImportedState] = useState<FeedSnapshot | null>(null);
   useEffect(() => {
+    setImportedState(loadImportedFeed());
     let cancelled = false;
     (async () => {
       for (const url of ['api/akahu/snapshot', 'feed/live.json']) {
@@ -54,9 +74,18 @@ export function useFeed(client: Client): FeedState {
       cancelled = true;
     };
   }, []);
-  const snapshot = live ?? demoFeedFor(client);
+  const setImported = (s: FeedSnapshot | null) => {
+    try {
+      if (s) localStorage.setItem(IMPORTED_FEED_KEY, JSON.stringify(s));
+      else localStorage.removeItem(IMPORTED_FEED_KEY);
+    } catch {
+      /* storage blocked — session-only import still works */
+    }
+    setImportedState(s);
+  };
+  const snapshot = imported ?? live ?? demoFeedFor(client);
   const analysis = useMemo(() => analyseFeed(snapshot, client), [snapshot, client]);
-  return { snapshot, analysis, isLive: !!live };
+  return { snapshot, analysis, isLive: snapshot.provider !== 'demo', setImported, importedActive: !!imported };
 }
 
 type RowMark = 'one-off' | 'discretionary' | 'excluded' | 'accepted' | undefined;
@@ -120,10 +149,17 @@ export function LiveDataPanel({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-display text-[15px] font-semibold text-ink">Spending — actual vs declared vs benchmark</h3>
         <div className="flex items-center gap-2">
-          <Pill tone={feed.isLive ? 'green' : 'slate'}>{feed.isLive ? '● Akahu connected' : '○ Demo feed'}</Pill>
+          <Pill tone={feed.isLive ? 'green' : 'slate'}>
+            {feed.snapshot.provider === 'akahu' ? '● Akahu connected' : feed.snapshot.provider === 'csv' ? '● Imported data' : '○ Demo feed'}
+          </Pill>
           <span className="text-[11px] text-slate-500b">
             {a.provider} · {a.monthsCovered} months · synced {a.syncedAt.slice(0, 10)}
           </span>
+          {feed.importedActive && !presentation ? (
+            <button onClick={() => feed.setImported(null)} className="text-[11px] font-medium text-rose-600b hover:underline">
+              clear imported data
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -410,8 +446,8 @@ export function LiveDataPanel({
             <p className="mt-1 text-[12.5px] leading-relaxed text-navy-800/85">
               Securely connect your bank accounts so we can pre-fill income, expenses and commitments. You remain in control of what is shared.
             </p>
-            {!feed.isLive ? (
-              <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {!feed.isLive ? (
                 <a
                   href="https://my.akahu.nz"
                   target="_blank"
@@ -420,9 +456,43 @@ export function LiveDataPanel({
                 >
                   Connect financial data
                 </a>
-                <span className="text-[11px] text-navy-800/70">via Akahu — a one-off account information share, not a statement upload</span>
-              </div>
-            ) : null}
+              ) : null}
+              <label className="cursor-pointer rounded-lg border border-navy-800/30 bg-white/70 px-4 py-2 text-[12.5px] font-semibold text-navy-800 hover:bg-white">
+                Import CSV / snapshot
+                <input
+                  type="file"
+                  accept=".csv,.json,text/csv,application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const text = String(reader.result ?? '');
+                      try {
+                        if (file.name.toLowerCase().endsWith('.json') || text.trimStart().startsWith('{')) {
+                          const s = JSON.parse(text);
+                          if (s && Array.isArray(s.transactions) && Array.isArray(s.accounts)) {
+                            feed.setImported(s);
+                            return;
+                          }
+                        }
+                        const s = parseCsvFeed(text, { bank: file.name.replace(/\.[^.]+$/, '') });
+                        if (s.transactions.length > 0) feed.setImported(s);
+                      } catch {
+                        /* unreadable file — leave the current feed in place */
+                      }
+                    };
+                    reader.readAsText(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <span className="text-[11px] text-navy-800/70">
+                Akahu is a one-off account information share, not a statement upload. A bank-export CSV (date, description, amount) or an Akahu
+                snapshot JSON works here today — it stays in this browser only.
+              </span>
+            </div>
             <ol className="mt-3 space-y-1 text-[11.5px] leading-relaxed text-navy-800/80">
               <li>1. Authorise at Akahu and choose which accounts to share (one-off account information flow)</li>
               <li>2. Blueprint retrieves the permitted account and transaction data through a server-side route — tokens and credentials never reach the browser, and bank logins are never stored</li>
