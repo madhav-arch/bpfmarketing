@@ -9,9 +9,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "bundle": "node scripts/bundle-single-file.js",
-    "sync:akahu": "node --experimental-strip-types scripts/akahu-pull.ts",
-    "apply:invite": "node --experimental-strip-types scripts/akahu-apply-pull.ts --create",
-    "apply:pull": "node --experimental-strip-types scripts/akahu-apply-pull.ts"
+    "sync:akahu": "NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/akahu-pull.ts",
+    "apply:invite": "NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/akahu-apply-pull.ts --create",
+    "apply:pull": "NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/akahu-apply-pull.ts"
   },
   "dependencies": {
     "next": "15.5.24",
