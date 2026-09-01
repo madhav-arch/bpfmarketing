@@ -56,6 +56,17 @@ html = html.replace(
 // 3. Drop preload/prefetch links pointing at /_next.
 html = html.replace(/<link rel="(preload|prefetch)"[^>]*\/_next[^>]*\/?>/g, '');
 
+// 3b. Embed a pre-pulled, PII-redacted live feed snapshot when present
+//     (written by `npm run apply:pull` / `npm run sync:akahu`). The static
+//     page cannot call Akahu itself, so the snapshot rides along inside the
+//     bundle and useFeed picks it up via globalThis.__BPF_LIVE_FEED__.
+const liveFeedPath = path.resolve(__dirname, '..', 'public', 'feed', 'live.json');
+if (fs.existsSync(liveFeedPath)) {
+  const feedJson = fs.readFileSync(liveFeedPath, 'utf8').replace(/<\//g, '<\\/');
+  html = html.replace('<script>globalThis.TURBOPACK_NEXT_CHUNK_URLS', `<script>globalThis.__BPF_LIVE_FEED__=${feedJson};</script><script>globalThis.TURBOPACK_NEXT_CHUNK_URLS`);
+  console.log(`Embedded live feed snapshot (${(feedJson.length / 1024).toFixed(0)} KB) from public/feed/live.json`);
+}
+
 // 4. Some minified strings contain a literal U+FFFD, which strict hosts
 //    reject — escape it inside JS string literals (semantically identical).
 html = html.replace(/"�"/g, '"\\uFFFD"');

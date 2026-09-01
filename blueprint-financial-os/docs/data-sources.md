@@ -100,3 +100,30 @@ developers.akahu.nz docs (unreachable from the current sandbox) before that
 route is written. Never embed the app secret or invite tokens in browser
 code; treat invite links as sensitive (anyone holding one can complete that
 application).
+
+## Akahu Apply — the automated pipeline (endpoints verified 2026-09-01)
+
+The organisation holds an **Akahu Apply** account; its API key (Bearer auth,
+`api.apply.akahu.nz`) lives in `.env.local` as `AKAHU_APPLY_API_KEY` and is
+never committed or sent to a browser. The full automated flow:
+
+```
+npm run apply:invite -- --reference "Jane & Sam"   # POST /v1/applications
+                                                   # POST .../sharing-request
+    → prints the apply.akahu.nz link to send to the client
+
+(client completes the one-off share: open banking connection and/or PDFs)
+
+npm run apply:pull                                 # GET  .../resources (poll)
+                                                   # POST .../reports (poll)
+                                                   # GET  .../reports/{id}/json
+    → maps + redacts via lib/data-sources/mapApply.ts
+    → writes public/feed/live.json
+```
+
+The app picks the snapshot up three ways: the dev server serves it, the
+single-file bundle embeds it at build time (`globalThis.__BPF_LIVE_FEED__`),
+and the Import button accepts it as a file. Application ids are remembered in
+`.akahu-apply.json` (git-ignored). Akahu Apply's own enrichment (spending and
+income categories, transfer detection, deduplication) rides through as the
+provider category, taking precedence over the local keyword rules.

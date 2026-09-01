@@ -45,3 +45,4 @@ next-env.d.ts
 
 # live bank-feed snapshots — real client data, never commit
 /public/feed/
+/.akahu-apply.json

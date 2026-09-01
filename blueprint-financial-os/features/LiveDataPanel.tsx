@@ -49,11 +49,24 @@ function loadImportedFeed(): FeedSnapshot | null {
 /** Feed priority: adviser-imported snapshot (CSV / Akahu JSON, stored only in
  *  this browser) → live Akahu (server route or pre-synced file) → demo feed.
  *  Tokens never reach this code — the route holds them server-side. */
+function embeddedFeed(): FeedSnapshot | null {
+  // The single-file bundle can carry a pre-pulled, PII-redacted snapshot
+  // (injected by scripts/bundle-single-file.js from public/feed/live.json).
+  try {
+    const s = (globalThis as unknown as { __BPF_LIVE_FEED__?: FeedSnapshot }).__BPF_LIVE_FEED__;
+    if (s && Array.isArray(s.transactions) && Array.isArray(s.accounts)) return s;
+  } catch {
+    /* no embedded feed */
+  }
+  return null;
+}
+
 export function useFeed(client: Client): FeedState {
-  const [live, setLive] = useState<FeedSnapshot | null>(null);
+  const [live, setLive] = useState<FeedSnapshot | null>(() => embeddedFeed());
   const [imported, setImportedState] = useState<FeedSnapshot | null>(null);
   useEffect(() => {
     setImportedState(loadImportedFeed());
+    if (embeddedFeed()) return; // embedded snapshot wins — no fetch needed
     let cancelled = false;
     (async () => {
       for (const url of ['api/akahu/snapshot', 'feed/live.json']) {
