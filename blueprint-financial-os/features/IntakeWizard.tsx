@@ -13,6 +13,7 @@ import {
 } from '@/lib/intake/buildClient';
 import { TAX_CURRENT } from '@/lib/rules/taxTables';
 import { Card, Pill } from '@/components/ui';
+import { parseCsvFeed } from '@/lib/data-sources/providers';
 import { money, pct } from '@/lib/format';
 
 const ROLE_OPTIONS: { value: StreamRole; label: string }[] = [
@@ -35,11 +36,17 @@ export function IntakeWizard({
   isLive,
   onCreate,
   onCancel,
+  setImported,
+  inviteUrl,
 }: {
   feed: FeedSnapshot;
   isLive: boolean;
   onCreate: (client: Client, assumptions: string[]) => void;
   onCancel: () => void;
+  /** store an adviser/client-imported snapshot (CSV or Akahu JSON) */
+  setImported?: (s: FeedSnapshot | null) => void;
+  /** the Akahu Apply sharing link for this session, when one exists */
+  inviteUrl?: string | null;
 }) {
   const [clientType, setClientType] = useState<ClientType>('homeowner');
   const [clientLabel, setClientLabel] = useState('');
@@ -176,11 +183,77 @@ export function IntakeWizard({
         </div>
       </Card>
 
-      {/* 2 — Property */}
+      {/* 2 — Connect accounts (Akahu one-off share) */}
+      <Card className={`mt-4 p-6 ${isLive ? '' : 'border-teal-500/40'}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-display text-[15px] font-semibold text-ink">2 · Connect your accounts</h3>
+          <Pill tone={isLive ? 'green' : 'slate'}>
+            {isLive ? `● Connected — ${feed.accounts.length} accounts · ${feed.transactions.length} transactions` : '○ Not connected yet'}
+          </Pill>
+        </div>
+        {isLive ? (
+          <p className="mt-2 text-[12.5px] leading-relaxed text-slate-500b">
+            Your bank data is in. Income, spending and lending below are pre-filled from it — confirm the classifications in step 4 and you are done.
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-slate-500b">
+              Securely share your accounts so income, expenses and commitments pre-fill themselves. It is a one-off share through Akahu — you
+              choose which accounts, and your bank login is never seen or stored.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <a
+                href={inviteUrl ?? 'https://my.akahu.nz'}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg bg-navy-900 px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-navy-800"
+              >
+                Connect my accounts via Akahu
+              </a>
+              {setImported ? (
+                <label className="cursor-pointer rounded-lg border border-line bg-white px-4 py-2.5 text-[13px] font-semibold text-slate-500b hover:bg-mist">
+                  or import a CSV / snapshot
+                  <input
+                    type="file"
+                    accept=".csv,.json,text/csv,application/json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const text = String(reader.result ?? '');
+                        try {
+                          if (file.name.toLowerCase().endsWith('.json') || text.trimStart().startsWith('{')) {
+                            const s = JSON.parse(text);
+                            if (s && Array.isArray(s.transactions) && Array.isArray(s.accounts)) return setImported(s as FeedSnapshot);
+                          }
+                          const s = parseCsvFeed(text, { bank: file.name.replace(/\.[^.]+$/, '') });
+                          if (s.transactions.length > 0) setImported(s);
+                        } catch {
+                          /* unreadable file — stay on the demo feed */
+                        }
+                      };
+                      reader.readAsText(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              ) : null}
+              <span className="text-[11.5px] text-slate-500b">You can also continue without connecting — the file starts on demo data.</span>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500b">
+              After submitting the Akahu share, the adviser refreshes the data (`npm run apply:pull` + rebuild) and this step shows connected.
+            </p>
+          </>
+        )}
+      </Card>
+
+      {/* 3 — Property */}
       <Card className="mt-4 p-6">
         <div className="flex items-center justify-between">
           <h3 className="font-display text-[15px] font-semibold text-ink">
-            2 · {clientType === 'fhb' ? 'The purchase' : 'What they own'}
+            3 · {clientType === 'fhb' ? 'The purchase' : 'What they own'}
           </h3>
           {needsProperties ? (
             <button
@@ -238,11 +311,11 @@ export function IntakeWizard({
         )}
       </Card>
 
-      {/* 3 — What the feed already knows */}
+      {/* 4 — What the feed already knows */}
       <Card className="mt-4 p-6">
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-[15px] font-semibold text-ink">3 · What the bank feed already answered</h3>
-          <Pill tone={isLive ? 'green' : 'slate'}>{isLive ? '● Akahu connected' : '○ Demo feed — run npm run sync:akahu for live data'}</Pill>
+          <h3 className="font-display text-[15px] font-semibold text-ink">4 · What the bank feed already answered</h3>
+          <Pill tone={isLive ? 'green' : 'slate'}>{isLive ? '● Akahu connected' : '○ Demo feed shown until accounts are connected'}</Pill>
         </div>
 
         <div className="mt-4">

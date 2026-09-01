@@ -20,6 +20,7 @@ import { CompareView, type CompareColumn } from './CompareView';
 import { Copilot } from './Copilot';
 import { useFeed } from './LiveDataPanel';
 import { IntakeWizard } from './IntakeWizard';
+import { Landing, inviteLink } from './Landing';
 import type { SectionProps } from './types';
 
 const CUSTOM_CLIENTS_KEY = 'bpf-custom-clients-v1';
@@ -96,7 +97,9 @@ export default function Workspace() {
   const [customClients, setCustomClients] = useState<Client[]>([]);
   const [intakeAssumptions, setIntakeAssumptions] = useState<Record<string, string[]>>({});
   const [showIntake, setShowIntake] = useState(false);
+  const [showLanding, setShowLanding] = useState(true);
   const [dismissedAssumptions, setDismissedAssumptions] = useState<Record<string, boolean>>({});
+  const pendingSection = useRef<string | null>(null);
 
   useEffect(() => {
     const stored = loadCustomClients();
@@ -104,7 +107,22 @@ export default function Workspace() {
       setCustomClients(stored.clients);
       setIntakeAssumptions(stored.assumptions);
     }
+    try {
+      if (localStorage.getItem('bpf-landing-done') === '1') setShowLanding(false);
+    } catch {
+      /* storage blocked — landing shows */
+    }
   }, []);
+
+  const dismissLanding = (then: 'intake' | 'workspace') => {
+    try {
+      localStorage.setItem('bpf-landing-done', '1');
+    } catch {
+      /* non-fatal */
+    }
+    setShowLanding(false);
+    setShowIntake(then === 'intake');
+  };
 
   const allClients = [...DEMO_CLIENTS, ...customClients];
   const rawClient: Client = allClients.find((c) => c.id === clientId) ?? DEMO_CLIENTS[0];
@@ -132,7 +150,8 @@ export default function Workspace() {
 
   useEffect(() => {
     setView('working');
-    setSection('goals');
+    setSection(pendingSection.current ?? 'goals');
+    pendingSection.current = null;
     setComparePick(null);
     setCompareCols(null);
   }, [clientId]);
@@ -283,13 +302,27 @@ export default function Workspace() {
     setComparePick(null);
   };
 
+  if (showLanding) {
+    return (
+      <div className="h-screen overflow-y-auto">
+        <Landing feed={feed} onStart={() => dismissLanding('intake')} onExplore={() => dismissLanding('workspace')} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* ---------------------------------------------------------------- Top bar */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-navy-800 bg-navy-950 px-4 text-white">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-teal-500 font-display text-[15px] font-bold text-navy-950">B</div>
+            <button
+              onClick={() => setShowLanding(true)}
+              title="Back to the landing page"
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-teal-500 font-display text-[15px] font-bold text-navy-950 transition-transform hover:scale-105"
+            >
+              B
+            </button>
             <div className="leading-tight">
               <div className="font-display text-[14px] font-semibold tracking-tight">Blueprint Financial OS</div>
               <div className="text-[9.5px] uppercase tracking-[0.22em] text-teal-300/70">Your Financial Blueprint</div>
@@ -501,8 +534,11 @@ export default function Workspace() {
           <IntakeWizard
             feed={feed.snapshot}
             isLive={feed.isLive}
+            setImported={feed.setImported}
+            inviteUrl={inviteLink()}
             onCancel={() => setShowIntake(false)}
             onCreate={(client, assumptions) => {
+              pendingSection.current = 'today';
               const next = [...customClients.filter((c) => c.id !== client.id), client];
               const nextAssumptions = { ...intakeAssumptions, [client.id]: assumptions };
               setCustomClients(next);

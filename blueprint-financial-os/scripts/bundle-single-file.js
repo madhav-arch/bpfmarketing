@@ -67,6 +67,23 @@ if (fs.existsSync(liveFeedPath)) {
   console.log(`Embedded live feed snapshot (${(feedJson.length / 1024).toFixed(0)} KB) from public/feed/live.json`);
 }
 
+// 3c. Embed the current Akahu Apply sharing link (from .akahu-apply.json,
+//     written by `npm run apply:invite`) so the landing/intake connect step
+//     opens the real one-off share. Link only — never the API key.
+const applyStatePath = path.resolve(__dirname, '..', '.akahu-apply.json');
+if (fs.existsSync(applyStatePath)) {
+  try {
+    const apps = JSON.parse(fs.readFileSync(applyStatePath, 'utf8'));
+    const link = [...apps].reverse().find((a) => a.link)?.link;
+    if (link && /^https:\/\/apply\.akahu\.nz\//.test(link)) {
+      html = html.replace('<script>globalThis.TURBOPACK_NEXT_CHUNK_URLS', `<script>globalThis.__BPF_INVITE_LINK__=${JSON.stringify(link)};</script><script>globalThis.TURBOPACK_NEXT_CHUNK_URLS`);
+      console.log('Embedded Akahu Apply sharing link for the connect step.');
+    }
+  } catch {
+    /* unreadable state file — skip */
+  }
+}
+
 // 4. Some minified strings contain a literal U+FFFD, which strict hosts
 //    reject — escape it inside JS string literals (semantically identical).
 html = html.replace(/"�"/g, '"\\uFFFD"');
