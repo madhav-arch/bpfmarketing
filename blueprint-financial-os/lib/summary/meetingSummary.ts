@@ -2,6 +2,7 @@ import type { Client } from '../domain/types';
 import type { CalculationResult } from '../scenarios/compute';
 import type { ChangeExplanation } from '../scenarios/diff';
 import { describeChange, type ScenarioChange } from '../scenarios/changes';
+import { moneyTenK } from '../format';
 
 const $ = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
@@ -60,7 +61,7 @@ export function buildMeetingSummary(input: SummaryInput): string {
   );
   lines.push(`- Uncommitted monthly income: ${$(selected.servicing.umi)}`);
   lines.push(
-    `- Indicative borrowing capacity: ${$(selected.lenderComparison.range.min)} – ${$(selected.lenderComparison.range.max)} (varies by lender policy)`,
+    `- Indicative borrowing capacity: ${moneyTenK(selected.lenderComparison.range.min)} – ${moneyTenK(selected.lenderComparison.range.max)} (rounded to the nearest $10,000; varies by lender policy)`,
   );
   lines.push('');
 
@@ -114,7 +115,7 @@ export function buildMeetingSummary(input: SummaryInput): string {
     const row = (label: string, get: (r: CalculationResult) => string) =>
       lines.push(`| ${label} | ${cols.map((c) => get(c.result)).join(' | ')} |`);
     row('Monthly surplus', (r) => $(r.snapshot.monthlySurplus));
-    row('Borrowing capacity', (r) => `${$(r.lenderComparison.range.min)}–${$(r.lenderComparison.range.max)}`);
+    row('Borrowing capacity', (r) => `${moneyTenK(r.lenderComparison.range.min)}–${moneyTenK(r.lenderComparison.range.max)}`);
     if (client.mortgages.length > 0) {
       row('Mortgage-free', (r) => (r.amortisation.blueprint.paidOff ? `~${r.amortisation.blueprint.payoffYear}` : 'IO — no payoff path'));
       row('Interest remaining', (r) => $(r.amortisation.blueprint.totalInterest));
@@ -175,5 +176,51 @@ export function buildMeetingSummary(input: SummaryInput): string {
   lines.push(
     '_All figures are illustrative modelling based on stated assumptions and versioned rule sets — not a loan offer, valuation, or guarantee. Lender policy and rates change._',
   );
+  return lines.join('\n');
+}
+
+/**
+ * Simplified email meeting summary — a short, client-friendly draft the
+ * adviser can paste straight into an email. Same engine figures as the full
+ * summary, an order of magnitude fewer of them.
+ */
+export function buildShortEmail(input: SummaryInput): string {
+  const { client, selected } = input;
+  const s = selected.snapshot;
+  const firstNames = client.applicants.map((a) => a.displayName.split(' ')[0]).join(' and ');
+  const lines: string[] = [];
+
+  lines.push(`Hi ${firstNames || 'there'},`);
+  lines.push('');
+  lines.push('Great to catch up today. The short version of where things landed:');
+  lines.push('');
+  lines.push(
+    `- Indicative borrowing capacity: ${moneyTenK(selected.lenderComparison.range.min)} – ${moneyTenK(selected.lenderComparison.range.max)} depending on the lender (rounded to the nearest $10,000).`,
+  );
+  if (selected.fhb) {
+    lines.push(
+      `- The purchase we modelled: ${$(selected.fhb.purchasePrice)} with a ${(selected.fhb.depositPercent * 100).toFixed(1)}% deposit — repayments about ${$(selected.fhb.repaymentFortnightly)}/fortnight.`,
+    );
+  }
+  lines.push(`- Monthly surplus after everything: ${$(s.monthlySurplus)}.`);
+  if (client.mortgages.length > 0 && selected.amortisation.blueprint.paidOff) {
+    lines.push(`- On the plan we agreed, you're mortgage-free around ${selected.amortisation.blueprint.payoffYear}.`);
+  }
+  if (input.changes.length > 0) {
+    lines.push('');
+    lines.push('What we agreed to model:');
+    for (const c of input.changes.slice(0, 5)) lines.push(`- ${describeChange(c)}`);
+  }
+  if (input.outstandingInformation && input.outstandingInformation.length > 0) {
+    lines.push('');
+    lines.push('What I need from you:');
+    for (const o of input.outstandingInformation) lines.push(`- ${o}`);
+  }
+  lines.push('');
+  lines.push('Next step: book the follow-up and we lock the structure in.');
+  lines.push('');
+  lines.push('These figures are indicative modelling, not a loan offer — lender policy and rates change.');
+  lines.push('');
+  lines.push('Madhav');
   return lines.join('\n');
 }

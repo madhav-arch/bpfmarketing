@@ -146,7 +146,10 @@ export function computeServicing(
 
   // Living expenses
   const bench = policy.expenseBenchmark;
-  let base = client.household.adults === 2 ? bench.couple : bench.single;
+  const adults = Math.max(1, client.household.adults);
+  // 1 adult → single; 2 → couple; each additional borrower adds another
+  // single-applicant allowance (confirm per lender — noted in the UI).
+  let base = adults >= 2 ? bench.couple + (adults - 2) * bench.single : bench.single;
   const grossMonthlyHousehold =
     client.applicants.reduce((s, a) => s + a.incomes.reduce((t, i) => t + i.grossAnnual * salaryMult, 0), 0) / 12;
   let incomeLinkedNote: string | undefined;
@@ -158,7 +161,7 @@ export function computeServicing(
   const fixed = client.expenses.fixedCommitmentsMonthly.reduce((s, i) => s + i.amount, 0);
   const livingItems = [
     {
-      label: client.household.adults === 2 ? 'Household baseline (couple)' : 'Household baseline (single)',
+      label: adults > 2 ? `Household baseline (${adults} borrowers)` : adults === 2 ? 'Household baseline (couple)' : 'Household baseline (single)',
       amount: base,
       note:
         'What the lender assumes it costs the household to live, breathe and eat at a minimum — no discretionary spending.' +
@@ -247,15 +250,22 @@ export function computeServicing(
 
   const umi = recognisedIncomeMonthly - livingTotal - debtTotal;
   const minUMIRequired = mortgageDebt > policy.minUMI.threshold ? policy.minUMI.above : policy.minUMI.below;
-  // Two floor semantics:
-  //  - deduction (bank policies, adviser's $500 rule): the floor must REMAIN
-  //    at max lending → capacity = PV(UMI − floor)
+  // Three pass-condition semantics (per-bank, adviser-calibrated 3 Sep 2026):
+  //  - ratio cap (Kiwibank NSR ≤ 92%, BNZ SI ≤ 105%): total outgoings incl.
+  //    the new repayment may not exceed cap × recognised income →
+  //    capacity = PV(cap × income − living − debt)
+  //  - deduction floor (ANZ $500, ASB $300, Westpac $180): the surplus must
+  //    REMAIN at max lending → capacity = PV(UMI − floor)
   //  - gate (Blueprint workbook parity): clear the floor → capacity = PV(UMI)
-  const maxNewLending = policy.umiFloorIsDeduction
-    ? Math.max(0, pv(stressMonthlyRate, stressPeriods, umi - minUMIRequired))
-    : umi > minUMIRequired
-      ? pv(stressMonthlyRate, stressPeriods, umi)
-      : 0;
+  const maxRepaymentForNewLending =
+    policy.servicingRatioCap !== undefined
+      ? policy.servicingRatioCap * recognisedIncomeMonthly - livingTotal - debtTotal
+      : policy.umiFloorIsDeduction
+        ? umi - minUMIRequired
+        : umi > minUMIRequired
+          ? umi
+          : 0;
+  const maxNewLending = Math.max(0, pv(stressMonthlyRate, stressPeriods, maxRepaymentForNewLending));
 
   // DTI
   const grossAnnualIncomeForDti =
@@ -271,13 +281,19 @@ export function computeServicing(
     { label: 'Living expenses (benchmark + commitments)', value: -livingTotal, format: 'currency' },
     { label: 'Debt servicing at stress rate', value: -debtTotal, format: 'currency' },
     { label: 'Uncommitted monthly income (UMI)', value: umi, format: 'currency' },
+    policy.servicingRatioCap !== undefined
+      ? {
+          label: `Pass condition: outgoings ≤ ${(policy.servicingRatioCap * 100).toFixed(0)}% of recognised income`,
+          format: 'text' as const,
+          note: `Max stress repayment for new lending = ${(policy.servicingRatioCap * 100).toFixed(0)}% × income − living − debt = $${Math.round(maxRepaymentForNewLending).toLocaleString()}/mo (adviser calibration — verify per release).`,
+        }
+      : {
+          label: `Pass condition: $${minUMIRequired}/mo surplus must remain at max lending`,
+          format: 'text' as const,
+          note: umi > minUMIRequired ? `Cleared — $${Math.round(maxRepaymentForNewLending).toLocaleString()}/mo supports new lending` : 'NOT cleared — no new lending supported',
+        },
     {
-      label: `Minimum UMI gate (must exceed $${minUMIRequired}/mo)`,
-      format: 'text',
-      note: umi > minUMIRequired ? 'Cleared' : 'NOT cleared — no new lending supported',
-    },
-    {
-      label: `Max new lending = PV(${(policy.stressRate * 100).toFixed(2)}%/12, ${policy.maxTermYears}y, UMI)`,
+      label: `Max new lending = PV(${(policy.stressRate * 100).toFixed(2)}%/12, ${policy.maxTermYears}y, max stress repayment)`,
       value: maxNewLending,
       format: 'currency',
     },
@@ -337,6 +353,10 @@ export function compareLenders(
     if (p.boarderScaling.maxPerBoarderWeekly)
       drivers.push(`Boarder income capped at $${p.boarderScaling.maxPerBoarderWeekly}/wk`);
     if (p.stressRateIsFloor) drivers.push(`Test rate is a floor — actual rate if higher`);
+    if (p.servicingRatioCap !== undefined)
+      drivers.push(`Pass condition: outgoings ≤ ${(p.servicingRatioCap * 100).toFixed(0)}% of recognised income`);
+    else if (p.minUMI.below !== base.minUMI.below)
+      drivers.push(`Minimum surplus $${p.minUMI.below}/mo vs $${base.minUMI.below}`);
     return { lender: p.lender, drivers };
   });
   return {

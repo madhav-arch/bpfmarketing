@@ -160,7 +160,7 @@ export function LiveDataPanel({
   return (
     <div className="mt-6">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-display text-[15px] font-semibold text-ink">Spending — actual vs declared vs benchmark</h3>
+        <h3 className="font-display text-[15px] font-semibold text-ink">Spending — transactionary vs fact find</h3>
         <div className="flex items-center gap-2">
           <Pill tone={feed.isLive ? 'green' : 'slate'}>
             {feed.snapshot.provider === 'akahu' ? '● Akahu connected' : feed.snapshot.provider === 'csv' ? '● Imported data' : '○ Demo feed'}
@@ -183,9 +183,8 @@ export function LiveDataPanel({
             <thead>
               <tr className="border-b border-line text-left text-[10.5px] uppercase tracking-[0.1em] text-slate-500b">
                 <th className="pb-2 pr-3 font-medium">Category</th>
-                <th className="pb-2 pr-3 text-right font-medium">Akahu actual</th>
-                <th className="pb-2 pr-3 text-right font-medium">Fact Find</th>
-                <th className="pb-2 pr-3 text-right font-medium">Bank benchmark*</th>
+                <th className="pb-2 pr-3 text-right font-medium">Transactionary</th>
+                <th className="pb-2 pr-3 text-right font-medium">Fact find</th>
                 <th className="pb-2 pr-3 text-right font-medium">Difference</th>
                 <th className="pb-2 text-right font-medium">Status</th>
               </tr>
@@ -247,9 +246,16 @@ export function LiveDataPanel({
                         '—'
                       )}
                     </td>
-                    <td className="num py-2 pr-3 text-right text-slate-500b">{r.benchmarkMonthly !== undefined ? money(r.benchmarkMonthly) : '—'}</td>
-                    <td className={`num py-2 pr-3 text-right font-semibold ${overBench ? 'text-rose-600b' : (r.differenceVsBenchmark ?? 0) < -0.3 ? 'text-green-600b' : 'text-slate-400'}`}>
-                      {r.differenceVsBenchmark !== undefined ? `${r.differenceVsBenchmark >= 0 ? '+' : '−'}${Math.round(Math.abs(r.differenceVsBenchmark) * 100)}% vs benchmark` : '—'}
+                    <td
+                      className={`num py-2 pr-3 text-right font-semibold ${
+                        r.factFindMonthly !== undefined && r.factFindMonthly > 0 && (r.akahuActualMonthly ?? 0) > r.factFindMonthly * 1.3
+                          ? 'text-rose-600b'
+                          : 'text-slate-400'
+                      }`}
+                    >
+                      {r.factFindMonthly !== undefined && r.factFindMonthly > 0 && r.akahuActualMonthly !== undefined
+                        ? `${r.akahuActualMonthly >= r.factFindMonthly ? '+' : '−'}${Math.round(Math.abs(r.akahuActualMonthly / r.factFindMonthly - 1) * 100)}% vs fact find`
+                        : '—'}
                     </td>
                     <td className="relative py-2 text-right">
                       {presentation ? (
@@ -295,13 +301,15 @@ export function LiveDataPanel({
                 <td className="py-2.5 pr-3">Total</td>
                 <td className="num py-2.5 pr-3 text-right">{money(table.actualTotal)}</td>
                 <td className="num py-2.5 pr-3 text-right">{money(table.declaredTotal)}</td>
-                <td className="num py-2.5 pr-3 text-right">{money(table.benchmarkTotal)}</td>
                 <td colSpan={2} />
               </tr>
             </tbody>
           </table>
         </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-slate-500b">*{table.note}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-slate-500b">
+          Transactionary = what the connected transaction data shows; fact find = what was declared. The bank benchmark comparison lives on
+          the "How The Bank Sees You" screen where it belongs in the story. Review flags still consider the benchmark behind the scenes.
+        </p>
       </Card>
 
       {/* ------------------------------------------- Items worth checking */}
@@ -320,7 +328,15 @@ export function LiveDataPanel({
                   <th className="pb-2 pr-3 text-right font-medium">Amount</th>
                   <th className="pb-2 pr-3 font-medium">Likely category</th>
                   <th className="pb-2 pr-3 font-medium">Recurring?</th>
-                  <th className="pb-2 text-right font-medium">Include in ongoing?</th>
+                  <th className="pb-2 text-right font-medium">
+                    Include in ongoing?
+                    <span
+                      title="Included items count toward the monthly spending averages used in forward modelling. Exclude genuine one-offs (a flight, a repair) so they are not treated as permanent monthly spending; the raw transaction data is always kept."
+                      className="ml-1 inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8.5px] normal-case text-slate-500b"
+                    >
+                      ?
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>

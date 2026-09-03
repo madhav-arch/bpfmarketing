@@ -95,6 +95,7 @@ export function computeFhb(
     ownershipOverrides?: { ratesMonthly?: number; insuranceMonthly?: number; otherMonthly?: number };
     cashback?: CashbackAssumptions;
     cashbackOverride?: { amount: number; retentionMonths?: number };
+    upfrontCostOverrides?: Record<string, number>;
   },
 ): FhbResult {
   const term = opts.termYears ?? policy.maxTermYears;
@@ -136,8 +137,11 @@ export function computeFhb(
     };
   });
 
+  const costItems = costs.items.map((i) =>
+    opts.upfrontCostOverrides?.[i.key] !== undefined ? { ...i, amount: opts.upfrontCostOverrides[i.key], note: `${i.note ?? ''} (adviser-edited)`.trim() } : i,
+  );
   const byStage: Record<string, number> = {};
-  for (const item of costs.items) byStage[item.stage] = (byStage[item.stage] ?? 0) + item.amount;
+  for (const item of costItems) byStage[item.stage] = (byStage[item.stage] ?? 0) + item.amount;
 
   const ratesMonthly = opts.ownershipOverrides?.ratesMonthly ?? opts.ownership?.ratesMonthly ?? 350;
   const insuranceMonthly = opts.ownershipOverrides?.insuranceMonthly ?? opts.ownership?.insuranceMonthly ?? 150;
@@ -165,7 +169,9 @@ export function computeFhb(
             : Math.round((cbAmount * (cbRetention - month)) / cbRetention),
     }));
 
-  const bankMaxLoan = opts.bankMaxLoan;
+  // Capacity presented to clients is rounded to the nearest $10,000 —
+  // banks quote borrowing power roughly; false precision misleads.
+  const bankMaxLoan = Math.round(opts.bankMaxLoan / 10_000) * 10_000;
   const comfortableLoan = Math.min(bankMaxLoan * 0.9, loan > 0 ? loan : bankMaxLoan * 0.9);
 
   return {
@@ -186,8 +192,8 @@ export function computeFhb(
     tiers,
     maxPurchaseAtDeposit: (pct: number) => (pct > 0 ? totalDeposit / pct : 0),
     upfrontCosts: {
-      items: costs.items,
-      total: costs.items.reduce((s, i) => s + i.amount, 0),
+      items: costItems,
+      total: costItems.reduce((s, i) => s + i.amount, 0),
       byStage,
     },
     ownershipCosts,

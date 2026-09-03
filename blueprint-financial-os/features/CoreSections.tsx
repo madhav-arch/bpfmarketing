@@ -3,66 +3,112 @@
 import { useState } from 'react';
 import { Card, SectionHeading, Stat, InfoTip, Pill, AnimatedNumber, BankMark, EditableValue, FreqToggle, FREQ_PER_YEAR, FREQ_SHORT, type DisplayFrequency } from '@/components/ui';
 import { LENDERS_TO_BE_TESTED } from '@/lib/rules/nzBankPolicies';
-import { money, moneyShort, pct } from '@/lib/format';
+import { money, moneyShort, moneyTenK, moneyTenKShort, pct } from '@/lib/format';
 import { netMonthlyFromSalary, grossFromNetMonthly } from '@/lib/calculators/tax';
 import { pmt } from '@/lib/calculators/finance';
 import type { SectionProps } from './types';
-import type { GoalKind, Client } from '@/lib/domain/types';
+import type { Client } from '@/lib/domain/types';
 import type { ScenarioChange } from '@/lib/scenarios/changes';
 import { LiveDataPanel } from './LiveDataPanel';
 
-const GOAL_ICONS: Partial<Record<GoalKind, string>> = {
-  'buy-first-home': '⌂',
-  'comfortable-budget': '◎',
-  'pay-off-faster': '↯',
-  'improve-cashflow': '≋',
-  refix: '⟳',
-  refinance: '⇄',
-  restructure: '⌗',
-  'buy-investment': '⌂+',
-  'improve-yield': '%',
-  'build-equity': '▲',
-  'mortgage-free-by': '✓',
-  'family-planning': '☺',
-  'retirement-income': '☀',
-  'review-kiwisaver': '◔',
-  'protect-income': '⛨',
-  'help-children': '⌂→',
-  other: '·',
-};
 
 // ---------------------------------------------------------------------------
 // 01 — Goals
 
-export function GoalsSection({ client }: SectionProps) {
+export function GoalsSection({ client, presentation, addChanges }: SectionProps) {
+  const [adding, setAdding] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newDetail, setNewDetail] = useState('');
+  const commitNewGoal = () => {
+    if (newLabel.trim()) addChanges([{ kind: 'addGoal', label: newLabel.trim(), detail: newDetail.trim() || undefined }]);
+    setAdding(false);
+    setNewLabel('');
+    setNewDetail('');
+  };
   return (
     <section>
       <SectionHeading
         index="01 · Your goals"
         title="What we're building toward"
-        lede="Everything in this session gets measured against these, not against what a bank will lend."
+        lede="Everything in this session gets measured against these, not against what a bank will lend. Add, edit or remove goals freely — the copilot models against this list."
+        right={
+          !presentation ? (
+            <button
+              onClick={() => setAdding(true)}
+              className="rounded-lg bg-teal-500 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-400"
+            >
+              + Add goal
+            </button>
+          ) : null
+        }
       />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {client.goals.map((g, i) => (
-          <Card key={g.id} className="bp-rise p-5" tone={i === 0 ? 'navy' : 'default'}>
-            <div className="flex items-start gap-4">
-              <div
-                className={`font-display flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-lg ${
-                  i === 0 ? 'bg-teal-500/20 text-teal-300' : 'bg-aqua-100 text-teal-500'
-                }`}
-              >
-                {GOAL_ICONS[g.kind] ?? '·'}
-              </div>
-              <div>
-                <div className={`font-display text-[16px] font-semibold ${i === 0 ? 'text-white' : 'text-ink'}`}>{g.label}</div>
-                {g.detail ? (
-                  <p className={`mt-1 text-[13px] leading-relaxed ${i === 0 ? 'text-navy-100/75' : 'text-slate-500b'}`}>{g.detail}</p>
-                ) : null}
-              </div>
+      <Card className="divide-y divide-line">
+        {client.goals.map((g) => (
+          <div key={g.id} className="group flex items-start gap-3 px-5 py-4">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500" />
+            <div className="min-w-0 flex-1">
+              {presentation ? (
+                <>
+                  <div className="font-display text-[15px] font-semibold text-ink">{g.label}</div>
+                  {g.detail ? <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500b">{g.detail}</p> : null}
+                </>
+              ) : (
+                <>
+                  <input
+                    defaultValue={g.label}
+                    onBlur={(e) => e.target.value !== g.label && addChanges([{ kind: 'updateGoal', goalId: g.id, label: e.target.value }])}
+                    className="font-display w-full bg-transparent text-[15px] font-semibold text-ink outline-none focus:text-teal-500"
+                  />
+                  <input
+                    defaultValue={g.detail ?? ''}
+                    placeholder="add detail…"
+                    onBlur={(e) => e.target.value !== (g.detail ?? '') && addChanges([{ kind: 'updateGoal', goalId: g.id, detail: e.target.value }])}
+                    className="mt-0.5 w-full bg-transparent text-[13px] leading-relaxed text-slate-500b outline-none focus:text-ink"
+                  />
+                </>
+              )}
             </div>
-          </Card>
+            {!presentation ? (
+              <button
+                onClick={() => addChanges([{ kind: 'removeGoal', goalId: g.id }])}
+                title="Remove this goal"
+                className="mt-1 hidden shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] text-slate-400 hover:border-rose-200 hover:text-rose-600b group-hover:block"
+              >
+                remove
+              </button>
+            ) : null}
+          </div>
         ))}
-      </div>
+        {client.goals.length === 0 ? (
+          <div className="px-5 py-6 text-[13px] text-slate-500b">No goals recorded yet — add the client's objectives and the modelling measures against them.</div>
+        ) : null}
+        {adding && !presentation ? (
+          <div className="flex flex-wrap items-center gap-2 bg-aqua-100/40 px-5 py-4">
+            <input
+              value={newLabel}
+              autoFocus
+              onChange={(e) => setNewLabel(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && commitNewGoal()}
+              placeholder="Goal, e.g. Mortgage-free before 55"
+              className="w-64 rounded-lg border border-teal-500 bg-white px-3 py-2 text-[13px] outline-none"
+            />
+            <input
+              value={newDetail}
+              onChange={(e) => setNewDetail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && commitNewGoal()}
+              placeholder="detail (optional)"
+              className="w-72 rounded-lg border border-line bg-white px-3 py-2 text-[13px] outline-none focus:border-teal-500"
+            />
+            <button
+              onClick={commitNewGoal}
+              className="rounded-lg bg-teal-500 px-3.5 py-2 text-[13px] font-semibold text-white"
+            >
+              Add
+            </button>
+            <button onClick={() => setAdding(false)} className="text-[12.5px] text-slate-500b hover:underline">cancel</button>
+          </div>
+        ) : null}
+      </Card>
     </section>
   );
 }
@@ -611,7 +657,7 @@ export function BankViewSection(props: SectionProps) {
               />
             )}{' '}
             test rate over {termYears} years, this supports approximately{' '}
-            <strong className="num font-display text-[18px] text-teal-300">{moneyShort(sv.maxNewLending)}</strong> of lending
+            <strong className="num font-display text-[18px] text-teal-300">{moneyTenK(sv.maxNewLending)}</strong> of lending
             {sv.minUMIRequired > 0 ? ` — after keeping the ${money(sv.minUMIRequired)}/mo minimum surplus in reserve` : ''}.
           </div>
           <div className="mt-2 flex items-center justify-between">
@@ -710,12 +756,12 @@ export function CapacitySection(props: SectionProps) {
           <div>
             <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-teal-300/80">Indicative lending capacity</div>
             <div className="font-display mt-1 text-[40px] font-semibold leading-none text-white">
-              <AnimatedNumber value={cmp.range.min} />
+              <AnimatedNumber value={cmp.range.min} format="money10k" />
               <span className="mx-2 text-teal-300">—</span>
-              <AnimatedNumber value={cmp.range.max} />
+              <AnimatedNumber value={cmp.range.max} format="money10k" />
             </div>
             <div className="mt-2 text-[12.5px] text-navy-100/70">
-              Across {cmp.results.length} lender profiles · indicative modelling, not an approval
+              Across {cmp.results.length} lender profiles · rounded to the nearest $10,000 · indicative modelling, not an approval
             </div>
           </div>
           {fhb ? (
@@ -724,7 +770,7 @@ export function CapacitySection(props: SectionProps) {
               <div className="font-display mt-1 text-[24px] font-semibold text-teal-300">
                 <AnimatedNumber value={fhb.totalDeposit} />
               </div>
-              <div className="mt-1 text-[12.5px] text-navy-100/70">≈ purchase range {moneyShort(cmp.range.min + fhb.totalDeposit)} – {moneyShort(cmp.range.max + fhb.totalDeposit)}</div>
+              <div className="mt-1 text-[12.5px] text-navy-100/70">≈ purchase range {moneyTenKShort(cmp.range.min + fhb.totalDeposit)} – {moneyTenKShort(cmp.range.max + fhb.totalDeposit)}</div>
             </div>
           ) : null}
         </div>
@@ -767,7 +813,7 @@ export function CapacitySection(props: SectionProps) {
                   />
                 </div>
                 <div className="w-24 text-right">
-                  <span className="num text-[13px] font-semibold text-ink">{moneyShort(r.capacity)}</span>
+                  <span className="num text-[13px] font-semibold text-ink">{moneyTenKShort(r.capacity)}</span>
                   {!presentation && r.stressRate ? (
                     <div className="text-[10px] text-slate-500b">tests @ {pct(r.stressRate)}</div>
                   ) : null}
@@ -884,7 +930,7 @@ export function CapacitySection(props: SectionProps) {
             </div>
             <p className="mt-4 rounded-lg bg-aqua-100 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-navy-800">
               Capacity is the lower of <strong>equity</strong> ({moneyShort(result.equity.maxPurchaseWithEquity)}) and{' '}
-              <strong>servicing</strong> ({moneyShort(cmp.range.max)} of new debt) — for {client.applicants.map((a) => a.displayName).join(' & ')},{' '}
+              <strong>servicing</strong> ({moneyTenKShort(cmp.range.max)} of new debt) — for {client.applicants.map((a) => a.displayName).join(' & ')},{' '}
               {result.equity.maxPurchaseWithEquity > cmp.range.max ? 'servicing is the binding constraint.' : 'equity is the binding constraint.'}
             </p>
           </Card>
@@ -898,6 +944,7 @@ export function CapacitySection(props: SectionProps) {
 // click applies it for real.
 
 function LeversRow({ client, result, addChanges, computePreview }: SectionProps) {
+  const [boarderWk, setBoarderWk] = useState(250);
   const before = result.servicing.maxNewLending;
   const cards = client.otherDebts.filter((d) => d.kind === 'credit-card' || d.kind === 'store-card');
   const cardLimit = cards.reduce((s, c) => s + c.limit, 0);
@@ -905,12 +952,13 @@ function LeversRow({ client, result, addChanges, computePreview }: SectionProps)
   const lead = client.applicants[0];
   const leadGross = lead?.incomes[0]?.grossAnnual ?? 0;
 
-  const levers: { key: string; label: string; changes: ScenarioChange[]; detail?: (after: number) => string }[] = [
+  const levers: { key: string; label: string; changes: ScenarioChange[]; detail?: (after: number) => string; editable?: boolean }[] = [
     {
       key: 'boarder',
-      label: 'Add boarder $250/wk',
-      changes: [{ kind: 'setBoarder', perWeek: 250 }],
-      detail: () => 'actual $1,083/mo — the bank recognises less (policy scaling)',
+      label: `Add boarder $${boarderWk}/wk`,
+      changes: [{ kind: 'setBoarder', perWeek: boarderWk }],
+      detail: () => `actual $${Math.round((boarderWk * 52) / 12).toLocaleString()}/mo — the bank recognises less (policy scaling)`,
+      editable: true,
     },
     ...(cardLimit > 0
       ? [
@@ -938,22 +986,36 @@ function LeversRow({ client, result, addChanges, computePreview }: SectionProps)
           const after = computePreview(l.changes).servicing.maxNewLending;
           const delta = after - before;
           return (
-            <button
+            <div
               key={l.key}
-              onClick={() => addChanges(l.changes)}
-              className="group rounded-xl border border-line bg-white p-3 text-left shadow-sm transition-all hover:border-teal-500/60 hover:shadow-md"
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('.group\\/ev, input')) return; // let the amount edit through
+                addChanges(l.changes);
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && addChanges(l.changes)}
+              className="group cursor-pointer rounded-xl border border-line bg-white p-3 text-left shadow-sm transition-all hover:border-teal-500/60 hover:shadow-md"
             >
-              <div className="text-[12px] font-semibold leading-snug text-ink">{l.label}</div>
+              <div className="text-[12px] font-semibold leading-snug text-ink">
+                {l.editable ? (
+                  <>
+                    Add boarder <EditableValue size="sm" value={boarderWk} onCommit={(v) => setBoarderWk(Math.round(v))} suffix="/wk" title="Custom boarder amount" />
+                  </>
+                ) : (
+                  l.label
+                )}
+              </div>
               <div className="num mt-1.5 text-[12px] text-slate-500b">
-                {moneyShort(before)} <span className="text-slate-300">→</span>{' '}
-                <span className={`font-semibold ${delta > 1000 ? 'text-green-600b' : delta < -1000 ? 'text-rose-600b' : 'text-ink'}`}>{moneyShort(after)}</span>
+                {moneyTenKShort(before)} <span className="text-slate-300">→</span>{' '}
+                <span className={`font-semibold ${delta > 1000 ? 'text-green-600b' : delta < -1000 ? 'text-rose-600b' : 'text-ink'}`}>{moneyTenKShort(after)}</span>
               </div>
               <div className={`num text-[11px] font-semibold ${delta > 1000 ? 'text-green-600b' : delta < -1000 ? 'text-rose-600b' : 'text-slate-400'}`}>
                 {delta >= 0 ? '+' : '−'}
                 {moneyShort(Math.abs(delta))} capacity
               </div>
               {l.detail ? <div className="mt-1 text-[10px] leading-snug text-slate-400">{l.detail(after)}</div> : null}
-            </button>
+            </div>
           );
         })}
       </div>

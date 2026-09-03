@@ -6,7 +6,7 @@
 // are marked as trade-offs, never naively green.
 
 import type { CalculationResult } from '@/lib/scenarios/compute';
-import { money, moneyShort, pct, years } from '@/lib/format';
+import { money, moneyShort, moneyTenKShort, pct, years } from '@/lib/format';
 
 export interface CompareColumn {
   id: string;
@@ -32,7 +32,7 @@ const ROWS: RowDef[] = [
   { label: 'Repayment / fortnight', get: (r) => r.fhb?.repaymentFortnightly ?? null, fmt: (v) => money(v), goodWhen: 'down', threshold: 10 },
   { label: 'Ownership cost / month', get: (r) => r.fhb?.ownershipCosts.totalMonthly ?? null, fmt: (v) => money(v), goodWhen: 'down', threshold: 20 },
   { label: 'Monthly buffer', get: (r) => r.snapshot.monthlySurplus, fmt: (v) => money(v), goodWhen: 'up', threshold: 40 },
-  { label: 'Borrowing capacity (model)', get: (r) => r.servicing.maxNewLending, fmt: moneyShort, goodWhen: 'up', threshold: 5000 },
+  { label: 'Borrowing capacity (model)', get: (r) => r.servicing.maxNewLending, fmt: moneyTenKShort, goodWhen: 'up', threshold: 5000 },
   { label: 'Mortgage-free', get: (r) => (r.amortisation.blueprint.paidOff ? r.amortisation.blueprint.payoffYear : null), fmt: (v) => `${Math.round(v)}`, goodWhen: 'down', threshold: 0.4 },
   { label: 'Years to mortgage-free', get: (r) => (r.amortisation.blueprint.paidOff ? r.amortisation.blueprint.termYears : null), fmt: years, goodWhen: 'down', threshold: 0.3 },
   { label: 'Interest remaining', get: (r) => r.amortisation.blueprint.totalInterest, fmt: moneyShort, goodWhen: 'down', threshold: 2000 },

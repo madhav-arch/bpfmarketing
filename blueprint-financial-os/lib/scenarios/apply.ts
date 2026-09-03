@@ -28,6 +28,7 @@ export interface ScenarioState {
   kiwiSaverWithdrawal?: boolean;
   inflationOverride?: number;
   kiwiSaverReturnOverride?: number;
+  upfrontCostOverrides: Record<string, number>;
 }
 
 // Sale-cost and LVR-cap assumptions used when restructuring on a sale —
@@ -60,7 +61,9 @@ export function applyScenario(baseline: Client, changes: ScenarioChange[]): Scen
     soldPropertyProceeds: 0,
     notes: [],
     ownershipCosts: {},
+    upfrontCostOverrides: {},
   };
+  let goalSeq = 0;
 
   for (const c of changes) {
     switch (c.kind) {
@@ -340,6 +343,26 @@ export function applyScenario(baseline: Client, changes: ScenarioChange[]): Scen
         else client.expenses.declaredMonthly.push({ category: c.category, amount: c.monthly });
         break;
       }
+      case 'addGoal': {
+        // Deterministic id: the change list is re-applied from the baseline on
+        // every recompute, so a module-counter id would change between applies
+        // and orphan updateGoal/removeGoal changes that reference it.
+        client.goals.push({ id: `goal-added-${++goalSeq}`, kind: 'other', label: c.label, detail: c.detail });
+        break;
+      }
+      case 'updateGoal': {
+        const g = client.goals.find((x) => x.id === c.goalId);
+        if (g) {
+          if (c.label !== undefined) g.label = c.label;
+          if (c.detail !== undefined) g.detail = c.detail;
+        }
+        break;
+      }
+      case 'removeGoal': {
+        client.goals = client.goals.filter((x) => x.id !== c.goalId);
+        break;
+      }
+      case 'setUpfrontCost': state.upfrontCostOverrides[c.key] = c.amount; break;
       case 'removeDebt': {
         if (c.debtId) client.otherDebts = client.otherDebts.filter((d) => d.id !== c.debtId);
         else if (c.debtKind) {

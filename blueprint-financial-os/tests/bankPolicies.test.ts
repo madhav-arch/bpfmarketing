@@ -127,12 +127,38 @@ describe('per-bank policy mechanics', () => {
     expect(res.stressedRepaymentMonthly).toBeCloseTo(pmt(0.085 / 12, 360, 400_000), 0);
   });
 
-  it('Blueprint $500 surplus floor applied to every bank', () => {
+  it('per-bank pass conditions (adviser calibration 3 Sep 2026)', () => {
+    const by = Object.fromEntries(NZ_BANK_POLICIES.map((p) => [p.lender, p]));
+    expect(by['ANZ'].minUMI.below).toBe(500); // $500/mo minimum surplus
+    expect(by['ASB'].minUMI.below).toBe(300); // $300/mo minimum surplus
+    expect(by['Westpac'].minUMI.below).toBe(180); // $180/mo minimum surplus
+    expect(by['Kiwibank'].servicingRatioCap).toBe(0.92); // NSR ≤ 92%
+    expect(by['BNZ'].servicingRatioCap).toBe(1.05); // servicing index ≤ 105%
     for (const p of NZ_BANK_POLICIES) {
-      expect(p.minUMI.below).toBe(500);
-      expect(p.minUMI.above).toBe(500);
       expect(p.requiresConfirmation).toBe(true);
       expect(p.brand?.color).toMatch(/^#/);
+    }
+  });
+
+  it('surplus floors remain exactly at maximum lending (ASB $300, Westpac $180)', () => {
+    for (const [lender, floor] of [['ASB', 300], ['Westpac', 180]] as const) {
+      const p = NZ_BANK_POLICIES.find((x) => x.lender === lender)!;
+      const res = computeServicing(fhbExample(), p, TAX_CURRENT);
+      const repayAtMax = pmt(p.stressRate / 12, p.maxTermYears * 12, res.maxNewLending);
+      expect(res.umi - repayAtMax).toBeCloseTo(floor, 0);
+    }
+  });
+
+  it('ratio caps size capacity as PV(cap × income − living − debt)', () => {
+    for (const [lender, cap] of [['Kiwibank', 0.92], ['BNZ', 1.05]] as const) {
+      const p = NZ_BANK_POLICIES.find((x) => x.lender === lender)!;
+      const res = computeServicing(fhbExample(), p, TAX_CURRENT);
+      const maxRepay = cap * res.recognisedIncomeMonthly - res.livingExpenses.totalMonthly - res.debtServicing.totalMonthly;
+      const repayAtMax = pmt(p.stressRate / 12, p.maxTermYears * 12, res.maxNewLending);
+      expect(repayAtMax).toBeCloseTo(maxRepay, 0);
+      // outgoings at max lending sit exactly on the cap
+      const outgoings = res.livingExpenses.totalMonthly + res.debtServicing.totalMonthly + repayAtMax;
+      expect(outgoings / res.recognisedIncomeMonthly).toBeCloseTo(cap, 4);
     }
   });
 });
@@ -164,8 +190,16 @@ describe('the FHB calculator example across all five banks', () => {
     expect(anz.umi - repayAtMax).toBeCloseTo(500, 0);
   });
 
-  it('BNZ (7.1% floor + big GLEE) sits below ASB (income-linked benchmark) for this family', () => {
-    const by = Object.fromEntries(cmp.results.map((r) => [r.lender, r.maxNewLending]));
-    expect(by['BNZ']).toBeLessThan(by['ASB']);
+  it('ANZ remains the tightest surplus condition of the floor banks', () => {
+    // ANZ keeps the $500/mo floor while ASB drops to $300 and Westpac to
+    // $180, so at identical benchmarks ANZ gives up the most capacity per
+    // dollar of floor. Sanity: loosening ASB/Westpac floors must never make
+    // them stricter than their own previous $500-floor capacity.
+    const by = Object.fromEntries(cmp.results.map((r) => [r.lender, r]));
+    for (const lender of ['ASB', 'Westpac'] as const) {
+      const p = NZ_BANK_POLICIES.find((x) => x.lender === lender)!;
+      const at500 = computeServicing(fhbExample(), { ...p, minUMI: { threshold: 0, below: 500, above: 500 } }, TAX_CURRENT);
+      expect(by[lender].maxNewLending).toBeGreaterThan(at500.maxNewLending);
+    }
   });
 });

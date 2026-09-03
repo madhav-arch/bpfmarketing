@@ -68,7 +68,9 @@ export interface Applicant {
 }
 
 export interface Household {
-  adults: 1 | 2;
+  /** number of adult borrowers on the application (additional borrowers
+   *  beyond a couple scale the benchmark living costs) */
+  adults: number;
   dependants: number;
   vehicles: number;
 }

@@ -9,21 +9,23 @@
 // of ~2.1%). They are versioned rule sets: effectiveFrom = the release date
 // found in the workbook, requiresConfirmation = always.
 //
-// UMI/surplus floor: per Blueprint's adviser instruction, ALL banks are
-// modelled with a $500/month minimum surplus (the banks' own floors are
-// lower — ANZ $100 buffer, Westpac $150 target, BNZ ~$1 MBS — and are noted).
+// Servicing pass conditions: per the adviser's calibration (meeting notes
+// 3 Sep 2026), each bank carries its own pass condition rather than one
+// blanket floor — ANZ $500/mo minimum surplus, ASB $300/mo, Westpac $180/mo,
+// Kiwibank net servicing ratio ≤ 92%, BNZ servicing index ≤ 105%. All are
+// deduction/cap semantics (the condition must still hold AT maximum lending)
+// and all remain flagged requiresConfirmation for ongoing testing.
 
 import type { LenderPolicy } from './types';
 
 const COMMON = {
   kind: 'lender-policy' as const,
-  verifiedAt: '2026-08-31',
+  verifiedAt: '2026-09-03',
   requiresConfirmation: true,
   maxTermYears: 30,
   weeklyToMonthly: 52 / 12,
   otherFinance: { rate: 0.139, termYears: 7 },
-  minUMI: { threshold: 0, below: 500, above: 500 }, // Blueprint floor, all banks
-  umiFloorIsDeduction: true, // $500/mo must REMAIN at maximum lending
+  umiFloorIsDeduction: true, // surplus floors must REMAIN at maximum lending
   dtiMultiple: 6,
   lvrPolicy: { ownerOccupiedMax: 0.8, investmentMax: 0.7 },
   lowEquityMargins: [
@@ -42,6 +44,7 @@ export const ANZ_POLICY: LenderPolicy = {
   effectiveFrom: '2026-06-22',
   source: 'ANZ Lending Affordability Calculator — Variables sheet (hidden), living-expense table dated 22 Jun 2026',
   stressRate: 0.0695, // Bank SSM (O/O and RIL both 6.95%); actual rate if higher
+  minUMI: { threshold: 0, below: 500, above: 500 }, // $500/mo minimum surplus (adviser calibration 3 Sep 2026)
   otScaling: 1.0, // calculator takes "other weekly income (already taxed)" at face value — adviser enters a sustainable figure
   boarderScaling: { percent: 0.5, maxBoarders: 2, maxPerBoarderWeekly: 450 }, // all-inclusive board 50% capped $450/wk (room-only 75% capped $300/wk)
   rentalScaling: 0.75,
@@ -52,7 +55,7 @@ export const ANZ_POLICY: LenderPolicy = {
   notes:
     'GLE living expense: applicant $1,012 + joint $912 + $276/dependant; vehicles not separately benchmarked. ' +
     'Cards 4%/mo of limit; personal loans tested 13.9% over ≤7y; student loan 12% over $24,128. ' +
-    'Room-only board (75%, cap $300/wk) not modelled separately — all-inclusive assumed. ANZ’s own UMI buffer is $100; Blueprint floor $500 applied.',
+    'Room-only board (75%, cap $300/wk) not modelled separately — all-inclusive assumed. ANZ’s own UMI buffer is $100; the adviser-calibrated $500/mo surplus floor applies.',
 };
 
 export const ASB_POLICY: LenderPolicy = {
@@ -63,6 +66,7 @@ export const ASB_POLICY: LenderPolicy = {
   effectiveFrom: '2026-06-01',
   source: 'ASB servicing calculator — Calc sheet scaling block + benchmark cells',
   stressRate: 0.0695,
+  minUMI: { threshold: 0, below: 300, above: 300 }, // $300/mo minimum surplus (adviser calibration 3 Sep 2026)
   otScaling: 0.8, // scaling table partially hidden — 80% assumed in line with peers; confirm
   boarderScaling: { percent: 0.8, maxBoarders: 2 },
   rentalScaling: 0.75,
@@ -90,6 +94,8 @@ export const BNZ_POLICY: LenderPolicy = {
   source: 'BNZ Affordability Calculator v12.34 — Sheet1 AIR inputs (released 23 Oct 2025) + GLEE table (11 Jun 2026)',
   stressRate: 0.071, // IR floor; loans test at max(actual + buffer[currently 0], 7.10%)
   stressRateIsFloor: true,
+  minUMI: { threshold: 0, below: 0, above: 0 },
+  servicingRatioCap: 1.05, // servicing index ≤ 105% (adviser calibration 3 Sep 2026 — verify against release)
   otScaling: 0.8, // overtime/bonus/commission/investment all shaded to 80%
   boarderScaling: { percent: 0.8, maxBoarders: 2, maxPerBoarderWeekly: 500 },
   rentalScaling: 0.75,
@@ -118,6 +124,7 @@ export const WESTPAC_POLICY: LenderPolicy = {
   effectiveFrom: '2026-07-08',
   source: 'Westpac Assess Serviceability calculator — Workings sheet (hidden); tax rates as at 8 Jul 2026; benchmark table Mar 2026 (CPI-indexed ~2.1%/yr)',
   stressRate: 0.0695, // HLN Lending Assessment Rate (personal lending 15.4% + 2.5% buffer)
+  minUMI: { threshold: 0, below: 180, above: 180 }, // $180/mo minimum surplus (adviser calibration 3 Sep 2026)
   otScaling: 0.8, // overtime/allowances/bonus/commission/pension/interest all 80%
   boarderScaling: { percent: 0.8, maxBoarders: 2 },
   rentalScaling: 0.75, // NZ rent; offshore rent 60%
@@ -134,7 +141,7 @@ export const WESTPAC_POLICY: LenderPolicy = {
   brand: { color: '#D5002B', mark: 'Westpac' },
   notes:
     'Benchmark is partial (declared transport/insurance/childcare etc. added on top) and CPI-indexed each release ' +
-    '(+2.098% then +2.120% uplifts visible in Workings). Westpac’s own minimum surplus is $150; Blueprint floor $500 applied. ' +
+    '(+2.098% then +2.120% uplifts visible in Workings). Westpac’s own minimum surplus target is $150; the adviser-calibrated $180/mo floor applies. ' +
     'Home-loan LAR 6.95%; buffer 0.35% recorded in Workings for HLN.',
 };
 
@@ -146,6 +153,8 @@ export const KIWIBANK_POLICY: LenderPolicy = {
   effectiveFrom: '2026-05-01',
   source: 'Kiwibank Adviser Home Loan Worksheet — test rate cell + haircut block (hidden columns); CCCFA benchmark model 2021 release',
   stressRate: 0.0695,
+  minUMI: { threshold: 0, below: 0, above: 0 },
+  servicingRatioCap: 0.92, // net servicing ratio ≤ 92% (adviser calibration 3 Sep 2026 — verify with BDM)
   otScaling: 0.8, // not directly visible — 80% assumed, confirm with BDM
   boarderScaling: { percent: 0.8, maxBoarders: 2 },
   // rent: 98% of gross recognised, then 23% rental-expense multiplier → ≈75.5% net

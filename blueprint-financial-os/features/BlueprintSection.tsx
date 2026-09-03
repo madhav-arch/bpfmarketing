@@ -8,12 +8,12 @@
 
 import { useMemo, useState } from 'react';
 import { Card, SectionHeading, Pill } from '@/components/ui';
-import { money, moneyShort, pct, years } from '@/lib/format';
+import { money, moneyShort, moneyTenKShort, pct, years } from '@/lib/format';
 import type { SectionProps } from './types';
 import type { ScenarioChange } from '@/lib/scenarios/changes';
 import { describeChange } from '@/lib/scenarios/changes';
 import { explainChange } from '@/lib/scenarios/diff';
-import { buildMeetingSummary } from '@/lib/summary/meetingSummary';
+import { buildMeetingSummary, buildShortEmail, type SummaryInput } from '@/lib/summary/meetingSummary';
 import { buildRationale } from '@/lib/summary/rationale';
 import { generateInsights, type Insight } from '@/lib/insights/engine';
 import type { CalculationResult } from '@/lib/scenarios/compute';
@@ -34,7 +34,7 @@ function opportunityAction(ins: Insight, result: CalculationResult): ScenarioCha
   if (ins.id === 'repayment-opportunity') return [{ kind: 'adjustRepayment', delta: 500, frequency: 'fortnightly' }];
   if (ins.id === 'deposit-tier-unlock' && result.fhb) {
     const next = result.fhb.tiers.find((t) => !t.achievable);
-    if (next) return [{ kind: 'setDepositSource', source: 'gift', value: Math.ceil(next.additionalRequired / 100) * 100 }];
+    if (next) return [{ kind: 'setDepositSource', source: 'other', value: Math.ceil(next.additionalRequired / 100) * 100 }];
   }
   return null;
 }
@@ -58,33 +58,37 @@ export function BlueprintSection(props: BlueprintProps) {
   const [approved, setApproved] = useState(false);
   const [adviserNotes, setAdviserNotes] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  const [summaryStyle, setSummaryStyle] = useState<'full' | 'simplified'>('full');
 
   const rationaleText = (key: 'benefits' | 'risks' | 'considerations') =>
     autoRationale[key].map((item, i) => rationaleEdits[`${key}-${i}`] ?? item.text);
 
-  const summary = useMemo(
-    () =>
-      buildMeetingSummary({
-        client,
-        scenarioName,
-        changes: scenarioChanges,
-        baseline,
-        selected: result,
-        diffs,
-        rationale: {
-          benefits: rationaleText('benefits'),
-          risks: rationaleText('risks'),
-          considerations: rationaleText('considerations'),
-        },
-        adviserNotes,
-        outstandingInformation: [
-          'IRD income summaries and latest payslips to confirm income figures',
-          'Confirmation of KiwiSaver balances from providers',
-          'Insurance policy schedules (covers, excesses, benefit periods)',
-        ],
-      }),
+  const summaryInput: SummaryInput = useMemo(
+    () => ({
+      client,
+      scenarioName,
+      changes: scenarioChanges,
+      baseline,
+      selected: result,
+      diffs,
+      rationale: {
+        benefits: rationaleText('benefits'),
+        risks: rationaleText('risks'),
+        considerations: rationaleText('considerations'),
+      },
+      adviserNotes,
+      outstandingInformation: [
+        'IRD income summaries and latest payslips to confirm income figures',
+        'Confirmation of KiwiSaver balances from providers',
+        'Insurance policy schedules (covers, excesses, benefit periods)',
+      ],
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, scenarioName, scenarioChanges, baseline, result, diffs, rationaleEdits, adviserNotes],
+  );
+  const summary = useMemo(
+    () => (summaryStyle === 'simplified' ? buildShortEmail(summaryInput) : buildMeetingSummary(summaryInput)),
+    [summaryInput, summaryStyle],
   );
 
   const hasChanges = scenarioChanges.length > 0;
@@ -225,6 +229,23 @@ export function BlueprintSection(props: BlueprintProps) {
           </div>
           {showSummary ? (
             <>
+              <div className="mt-4 flex items-center gap-2">
+                {(
+                  [
+                    ['full', 'Full summary'],
+                    ['simplified', 'Simplified email'],
+                  ] as const
+                ).map(([v, l]) => (
+                  <button
+                    key={v}
+                    onClick={() => setSummaryStyle(v)}
+                    className={`rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-colors ${summaryStyle === v ? 'border-navy-900 bg-navy-900 text-white' : 'border-line bg-white text-slate-500b hover:border-navy-700'}`}
+                  >
+                    {l}
+                  </button>
+                ))}
+                <span className="text-[11px] text-slate-500b">simplified = a short client-friendly email; both use the same engine figures</span>
+              </div>
               <div className="mt-4">
                 <label className="text-[11.5px] font-medium uppercase tracking-[0.12em] text-slate-500b">Adviser notes from the meeting (one per line)</label>
                 <textarea
@@ -329,7 +350,7 @@ function SnapshotTableInner({
     {
       label: 'Borrowing capacity',
       timeframe: 'today, indicative',
-      get: (r) => `${moneyShort(r.snapshot.maxLendingRange.min)}–${moneyShort(r.snapshot.maxLendingRange.max)}`,
+      get: (r) => `${moneyTenKShort(r.snapshot.maxLendingRange.min)}–${moneyTenKShort(r.snapshot.maxLendingRange.max)}`,
       num: (r) => r.snapshot.maxLendingRange.max,
       goodWhen: 'up',
     },
@@ -429,7 +450,7 @@ function FhbBlueprint({ result, baseline, ctx }: BlueprintProps) {
         <BRow label="Bank living costs" value={`−${money(sv.livingExpenses.totalMonthly)}/mo`} />
         <BRow label="Debt commitments" value={`−${money(sv.debtServicing.totalMonthly)}/mo`} />
         <BRow label="Stress repayment capacity" value={`${money(sv.umi)}/mo`} strong />
-        <BRow label="Indicative borrowing" value={moneyShort(sv.maxNewLending)} />
+        <BRow label="Indicative borrowing" value={moneyTenKShort(sv.maxNewLending)} />
         <BRow label="Deposit ready" value={moneyShort(f.totalDeposit)} />
         <BRow label="KiwiSaver today" value={moneyShort(baseline.snapshot.kiwiSaverNow)} />
       </BlockCard>
@@ -513,7 +534,7 @@ function HomeownerBlueprint({ client, result, baseline, scenarioChanges }: Bluep
         <BRow label="Interest difference" value={cur.totalInterest - bp.totalInterest > 100 ? `${moneyShort(cur.totalInterest - bp.totalInterest)} less` : '—'} />
         <BRow label="Cashflow" value={`${money(result.snapshot.monthlySurplus)}/mo`} />
         <BRow label="Usable equity" value={moneyShort(result.snapshot.usableEquity)} />
-        <BRow label="Future investment capacity" value={moneyShort(result.servicing.maxNewLending)} />
+        <BRow label="Future investment capacity" value={moneyTenKShort(result.servicing.maxNewLending)} />
         <BRow label={`KiwiSaver at ${client.retirement.targetAge}`} value={`${moneyShort(result.snapshot.kiwiSaverProjected)} nominal`} />
       </BlockCard>
     </div>
@@ -534,7 +555,7 @@ function InvestorBlueprint({ client, result, baseline, scenarioChanges }: Bluepr
         <BRow label="Usable equity" value={moneyShort(baseline.equity.totalUsableEquity)} />
         <BRow label="Rental income" value={`$${Math.round(rentWk(baseline, client))}/wk gross`} />
         <BRow label="Cashflow" value={`${money(baseline.snapshot.monthlySurplus)}/mo`} />
-        <BRow label="Servicing headroom" value={moneyShort(baseline.servicing.maxNewLending)} />
+        <BRow label="Servicing headroom" value={moneyTenKShort(baseline.servicing.maxNewLending)} />
       </BlockCard>
       <BlockCard title="Proposed strategy" step={2} accent>
         {scenarioChanges.length > 0 ? (
@@ -555,7 +576,7 @@ function InvestorBlueprint({ client, result, baseline, scenarioChanges }: Bluepr
         <BRow label="Equity" value={moneyShort(result.equity.totalValue - result.equity.totalDebt)} />
         <BRow label="LVR" value={pct(result.equity.portfolioLVR, 0)} />
         <BRow label="Cashflow" value={`${money(result.snapshot.monthlySurplus)}/mo`} />
-        <BRow label="Servicing headroom" value={moneyShort(result.servicing.maxNewLending)} strong />
+        <BRow label="Servicing headroom" value={moneyTenKShort(result.servicing.maxNewLending)} strong />
         <BRow label="Next purchase capacity" value={moneyShort(result.equity.maxPurchaseWithEquity)} />
         <BRow label="Net worth at retirement" value={`${moneyShort(result.retirement.projectedNetWorth)} nominal`} />
       </BlockCard>

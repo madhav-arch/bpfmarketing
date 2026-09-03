@@ -204,13 +204,13 @@ export function generateInsights(
         id: 'deposit-tier-unlock',
         severity: 'opportunity',
         category: 'mortgage',
-        message: `The deposit is ${money(nextTier.additionalRequired)} short of the ${Math.round(nextTier.depositPercent * 100)}% tier${marginDrop > 0 ? `, which drops the low-equity margin by ${(marginDrop * 100).toFixed(2)}% and the fortnightly repayment to ${money(nextTier.repaymentFortnightly)}` : ''}. A gift or extra savings unlocks it live.`,
+        message: `The deposit is ${money(nextTier.additionalRequired)} short of the ${Math.round(nextTier.depositPercent * 100)}% tier${marginDrop > 0 ? `, which drops the low-equity margin by ${(marginDrop * 100).toFixed(2)}% and the fortnightly repayment to ${money(nextTier.repaymentFortnightly)}` : ''}. Extra deposit funds unlock it live.`,
         supporting: [
           { label: `Additional cash for ${Math.round(nextTier.depositPercent * 100)}%`, value: nextTier.additionalRequired, format: 'currency' },
           { label: 'Margin at that tier', value: nextTier.lowEquityMargin, format: 'percent' },
         ],
         sourceRuleSetId: ctx.policy.id,
-        discuss: 'Is a family gift or a short savings push realistic before the purchase?',
+        discuss: 'Is a top-up of the deposit (savings push, family help, selling investments) realistic before the purchase?',
       });
     }
   }

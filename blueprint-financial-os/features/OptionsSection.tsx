@@ -173,6 +173,23 @@ function RepaymentLab({
           Interest difference: <strong className="num text-green-600b">{currentInterest - blueprintInterest > 100 ? money(currentInterest - blueprintInterest) : '—'}</strong>
         </span>
       </div>
+      <div className="mt-2 grid grid-cols-3 gap-3">
+        {[5, 10, 15].map((yr) => {
+          const at = (sch: typeof scheduleCurrent) => sch.find((p) => p.period >= yr * 12)?.balance ?? 0;
+          const cur = at(scheduleCurrent);
+          const bp = at(scheduleBlueprint);
+          return (
+            <div key={yr} className="rounded-lg bg-mist px-3 py-2 text-center">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">Balance in {yr} years</div>
+              <div className="num mt-0.5 text-[13px] font-semibold text-ink">
+                <span className="font-normal text-slate-400">{moneyShort(cur)}</span>
+                <span className="mx-1 text-slate-300">→</span>
+                <span className="text-teal-500">{moneyShort(bp)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </Card>
   );
 }
@@ -287,7 +304,7 @@ function FhbLab(props: SectionProps) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="p-6">
           <h3 className="font-display text-[15px] font-semibold text-ink">Deposit tiers — levels to unlock</h3>
-          <p className="mt-0.5 text-[12px] text-slate-500b">Adding gift or cash on screen 02 unlocks tiers live.</p>
+          <p className="mt-0.5 text-[12px] text-slate-500b">Adding deposit funds on screen 02 unlocks tiers live.</p>
           <div className="mt-4 space-y-2">
             {fhb.tiers.map((t) => (
               <div
@@ -306,11 +323,12 @@ function FhbLab(props: SectionProps) {
                   {!t.achievable && !presentation ? (
                     <button
                       onClick={() =>
-                        addChanges([{ kind: 'setDepositSource', source: 'gift', value: (client.targetPurchase?.depositSources.gift ?? 0) + Math.ceil(t.additionalRequired / 100) * 100 }])
+                        addChanges([{ kind: 'setDepositSource', source: 'other', value: (client.targetPurchase?.depositSources.other ?? 0) + Math.ceil(t.additionalRequired / 100) * 100 }])
                       }
+                      title="Adds the shortfall to Other funds — where it comes from (savings, gift, sale of shares) is the conversation"
                       className="rounded-lg border border-teal-500/50 px-2.5 py-1 text-[11px] font-semibold text-teal-500 hover:bg-teal-500 hover:text-white"
                     >
-                      Unlock with a {moneyShort(t.additionalRequired)} gift
+                      Unlock with {moneyShort(t.additionalRequired)} more deposit
                     </button>
                   ) : null}
                 </div>
@@ -383,12 +401,16 @@ function FhbLab(props: SectionProps) {
                       {i.note ? ` — ${i.note}` : ''}
                     </div>
                   </div>
-                  <span className="num font-semibold">{money(i.amount)}</span>
+                  {presentation ? (
+                    <span className="num font-semibold">{money(i.amount)}</span>
+                  ) : (
+                    <EditableValue size="sm" value={i.amount} onCommit={(v) => addChanges([{ kind: 'setUpfrontCost', key: i.key, amount: v }])} />
+                  )}
                 </div>
               ))}
               <div className="flex items-center justify-between bg-mist px-3.5 py-2.5 text-[13px] font-semibold">
                 <span>Have set aside & ready</span>
-                <span className="num">{money(fhb.upfrontCosts.total)}</span>
+                <span className="num"><AnimatedNumber value={fhb.upfrontCosts.total} /></span>
               </div>
             </div>
           </Card>
@@ -484,12 +506,21 @@ function PurchaseTimeline({ result, ctx, presentation }: SectionProps) {
   const ksHeavy = fhb.kiwiSaverShareOfDeposit > 0.5;
   const wd = ctx.ksWithdrawal;
   const steps = [
-    { n: 1, title: 'Find property', body: 'Look with the pre-approval in hand — you know the comfortable number, not just the maximum.' },
+    {
+      n: 1,
+      title: 'Find property',
+      body: 'Look with the pre-approval in hand — you know the comfortable number, not just the maximum.',
+      links: [
+        { label: 'Trade Me Property', href: 'https://www.trademe.co.nz/a/property' },
+        { label: 'realestate.co.nz', href: 'https://www.realestate.co.nz' },
+      ],
+    },
     { n: 2, title: 'Make offer', body: 'Usually by sale and purchase agreement with conditions attached. Your lawyer sees it before you sign anything unconditional.' },
     {
       n: 3,
       title: 'Conditions',
       body: 'The safety net while you check the property. Typical conditions: finance, building report, LIM, and solicitor approval. Only go unconditional once every one is satisfied.',
+      links: [{ label: 'Sale & purchase agreement guide (settled.govt.nz)', href: 'https://www.settled.govt.nz/buying-a-home/making-an-offer/understanding-the-sale-and-purchase-agreement/' }],
     },
     {
       n: 4,
@@ -514,6 +545,15 @@ function PurchaseTimeline({ result, ctx, presentation }: SectionProps) {
               <span className="font-display text-[13.5px] font-semibold text-ink">{s.title}</span>
             </div>
             <p className={`mt-2 text-[12px] leading-relaxed ${s.highlight ? 'text-amber-900' : 'text-slate-500b'}`}>{s.body}</p>
+            {'links' in s && s.links ? (
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                {s.links.map((l) => (
+                  <a key={l.href} href={l.href} target="_blank" rel="noreferrer" className="text-[11.5px] font-semibold text-teal-500 hover:underline">
+                    {l.label} ↗
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>

@@ -31,6 +31,16 @@ const ROLE_OPTIONS: { value: StreamRole; label: string }[] = [
 const field = 'w-full rounded-lg border border-line bg-white px-3 py-2 text-[13px] focus:border-teal-500 focus:outline-none';
 const label = 'mb-1 block text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500b';
 
+/** Statutory KiwiSaver employee contribution rates — a dropdown, never free text. */
+const KS_RATES = [0.03, 0.035, 0.04, 0.06, 0.08, 0.1];
+
+interface BorrowerInput {
+  name: string;
+  age: string;
+  /** manual fact-find entry: gross annual salary — overrides feed-detected salary for this borrower */
+  gross: string;
+}
+
 export function IntakeWizard({
   feed,
   isLive,
@@ -50,11 +60,13 @@ export function IntakeWizard({
 }) {
   const [clientType, setClientType] = useState<ClientType>('homeowner');
   const [clientLabel, setClientLabel] = useState('');
-  const [names, setNames] = useState(['', '']);
-  const [twoApplicants, setTwoApplicants] = useState(true);
+  const [borrowers, setBorrowers] = useState<BorrowerInput[]>([
+    { name: '', age: '', gross: '' },
+    { name: '', age: '', gross: '' },
+  ]);
+  const [ksRate, setKsRate] = useState(0.03);
   const [dependants, setDependants] = useState(0);
   const [vehicles, setVehicles] = useState(2);
-  const [ages, setAges] = useState(['', '']);
   const [cardLimits, setCardLimits] = useState('');
   const [properties, setProperties] = useState<IntakePropertyInput[]>([]);
   const [kiwiSaverTotal, setKiwiSaverTotal] = useState('');
@@ -69,9 +81,9 @@ export function IntakeWizard({
       ({
         expenses: { declaredMonthly: [], fixedCommitmentsMonthly: [] },
         mortgages: [],
-        household: { adults: twoApplicants ? 2 : 1, dependants, vehicles },
+        household: { adults: borrowers.length, dependants, vehicles },
       }) as unknown as Client,
-    [twoApplicants, dependants, vehicles],
+    [borrowers.length, dependants, vehicles],
   );
   const analysis = useMemo(() => analyseFeed(feed, shellClient), [feed, shellClient]);
   const autoRoles = useMemo(() => autoClassifyStreams(analysis.incomeStreams), [analysis]);
@@ -82,12 +94,12 @@ export function IntakeWizard({
 
   const create = () => {
     const form: IntakeForm = {
-      label: clientLabel || names.filter(Boolean).join(' & ') || 'New client',
+      label: clientLabel || borrowers.map((b) => b.name).filter(Boolean).join(' & ') || 'New client',
       clientType,
-      applicantNames: (twoApplicants ? names : names.slice(0, 1)).map((n, i) => n || `Applicant ${i + 1}`),
+      applicantNames: borrowers.map((b, i) => b.name || `Applicant ${i + 1}`),
       dependants,
       vehicles,
-      ages: clientType === 'fhb' ? ages.slice(0, twoApplicants ? 2 : 1).map((a) => parseInt(a, 10) || 30) : undefined,
+      ages: clientType === 'fhb' ? borrowers.map((b) => parseInt(b.age, 10) || 30) : undefined,
       creditCardLimits: num(cardLimits),
       properties: needsProperties ? properties.filter((p) => p.ownerEstimate > 0) : [],
       kiwiSaverTotal: clientType === 'fhb' ? num(kiwiSaverTotal) : undefined,
@@ -95,6 +107,8 @@ export function IntakeWizard({
       targetPrice: clientType === 'fhb' ? num(targetPrice) || undefined : undefined,
       streamRoles: roles,
       loanPropertyMap: loanMap,
+      kiwiSaverRate: ksRate,
+      manualGrossAnnual: borrowers.map((b) => num(b.gross)),
     };
     const built = buildClientFromIntake(form, feed, TAX_CURRENT);
     onCreate(built.client, built.assumptions);
@@ -144,17 +158,6 @@ export function IntakeWizard({
             <input className={field} value={clientLabel} onChange={(e) => setClientLabel(e.target.value)} placeholder="e.g. Madhav — own test" />
           </div>
           <div>
-            <span className={label}>Applicant 1 first name</span>
-            <input className={field} value={names[0]} onChange={(e) => setNames([e.target.value, names[1]])} />
-          </div>
-          <div>
-            <span className={label}>
-              <input type="checkbox" checked={twoApplicants} onChange={(e) => setTwoApplicants(e.target.checked)} className="mr-1.5 accent-[#2ab3b1]" />
-              Applicant 2 first name
-            </span>
-            <input className={field} disabled={!twoApplicants} value={names[1]} onChange={(e) => setNames([names[0], e.target.value])} />
-          </div>
-          <div>
             <span className={label}>Dependants</span>
             <input className={field} type="number" min={0} value={dependants} onChange={(e) => setDependants(parseInt(e.target.value, 10) || 0)} />
           </div>
@@ -166,20 +169,61 @@ export function IntakeWizard({
             <span className={label}>Combined credit-card limits</span>
             <input className={field} value={cardLimits} onChange={(e) => setCardLimits(e.target.value)} placeholder="$ (feed shows balances, not limits)" />
           </div>
-          {clientType === 'fhb' ? (
-            <>
-              <div>
-                <span className={label}>Age — applicant 1</span>
-                <input className={field} value={ages[0]} onChange={(e) => setAges([e.target.value, ages[1]])} placeholder="asked for FHBs only" />
-              </div>
-              {twoApplicants ? (
+          <div>
+            <span className={label}>KiwiSaver contribution rate</span>
+            <select className={field} value={String(ksRate)} onChange={(e) => setKsRate(parseFloat(e.target.value))}>
+              {KS_RATES.map((r) => (
+                <option key={r} value={String(r)}>{(r * 100).toLocaleString()}%</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Borrowers — up to 4; each extra borrower scales the living-cost benchmark */}
+        <div className="mt-5">
+          <div className="flex items-center justify-between">
+            <span className={label}>Borrowers ({borrowers.length})</span>
+            {borrowers.length < 4 ? (
+              <button
+                onClick={() => setBorrowers([...borrowers, { name: '', age: '', gross: '' }])}
+                className="rounded-lg border border-teal-500/50 bg-aqua-100 px-3 py-1.5 text-[12px] font-semibold text-teal-500 hover:bg-teal-500 hover:text-white"
+              >
+                + Add borrower
+              </button>
+            ) : null}
+          </div>
+          <div className="mt-2 space-y-2">
+            {borrowers.map((b, i) => (
+              <div key={i} className="grid grid-cols-2 items-end gap-3 rounded-lg border border-line p-3 md:grid-cols-4">
                 <div>
-                  <span className={label}>Age — applicant 2</span>
-                  <input className={field} value={ages[1]} onChange={(e) => setAges([ages[0], e.target.value])} />
+                  <span className={label}>Borrower {i + 1} first name</span>
+                  <input className={field} value={b.name} onChange={(e) => setBorrowers(borrowers.map((x, xi) => (xi === i ? { ...x, name: e.target.value } : x)))} />
                 </div>
-              ) : null}
-            </>
-          ) : null}
+                {clientType === 'fhb' ? (
+                  <div>
+                    <span className={label}>Age</span>
+                    <input className={field} value={b.age} onChange={(e) => setBorrowers(borrowers.map((x, xi) => (xi === i ? { ...x, age: e.target.value } : x)))} placeholder="asked for FHBs only" />
+                  </div>
+                ) : null}
+                <div>
+                  <span className={label}>Gross salary /yr — manual entry</span>
+                  <input className={field} value={b.gross} onChange={(e) => setBorrowers(borrowers.map((x, xi) => (xi === i ? { ...x, gross: e.target.value } : x)))} placeholder="$ (optional — feed fills this)" />
+                </div>
+                {borrowers.length > 1 ? (
+                  <button
+                    onClick={() => setBorrowers(borrowers.filter((_, xi) => xi !== i))}
+                    className="justify-self-start rounded-lg border border-line px-3 py-2 text-[12px] text-slate-500b hover:bg-mist"
+                  >
+                    remove
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-slate-500b">
+            A manual salary overrides feed-detected salary for that borrower — use it when there's no bank connection or the feed misreads the income.
+            Each borrower beyond two scales the household living-cost benchmark the banks apply.
+          </p>
         </div>
       </Card>
 
@@ -334,7 +378,7 @@ export function IntakeWizard({
                   value={roles[s.label] ?? autoRoles[s.label] ?? 'ignore'}
                   onChange={(e) => setRoles({ ...roles, [s.label]: e.target.value as StreamRole })}
                 >
-                  {ROLE_OPTIONS.filter((o) => twoApplicants || !o.value.endsWith('2')).map((o) => (
+                  {ROLE_OPTIONS.filter((o) => borrowers.length >= 2 || !o.value.endsWith('2')).map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>

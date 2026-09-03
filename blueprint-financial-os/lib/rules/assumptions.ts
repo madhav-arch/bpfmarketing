@@ -34,7 +34,7 @@ export const OWNERSHIP_COSTS: OwnershipCostAssumptions = {
   verifiedAt: '2026-08-31',
   requiresConfirmation: true,
   ratesMonthly: 350,
-  insuranceMonthly: 150,
+  insuranceMonthly: 140, // adviser calibration 3 Sep 2026
   otherMonthly: 0,
 };
 

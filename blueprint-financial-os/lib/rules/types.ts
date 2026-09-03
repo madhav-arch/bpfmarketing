@@ -61,6 +61,12 @@ export interface LenderPolicy extends RuleSetMeta {
   /** true → the UMI floor is deducted before sizing capacity (a $500 surplus
    *  must REMAIN at max lending); false/absent → workbook gate semantics. */
   umiFloorIsDeduction?: boolean;
+  /** Ratio-based servicing cap: total outgoings (benchmark living + stressed
+   *  debt + new-lending repayment) may not exceed `servicingRatioCap` ×
+   *  recognised net income. When set, this REPLACES the UMI floor for
+   *  capacity sizing (e.g. Kiwibank net servicing ratio ≤ 92%; BNZ servicing
+   *  index ≤ 105% — per adviser instruction 3 Sep 2026, verify per release). */
+  servicingRatioCap?: number;
   dtiMultiple: number;
   lvrPolicy: { ownerOccupiedMax: number; investmentMax: number };
   lowEquityMargins: LowEquityMarginBand[];

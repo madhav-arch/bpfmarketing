@@ -53,6 +53,11 @@ export interface IntakeForm {
   streamRoles?: Record<string, StreamRole>;
   /** feed loan-account id → property index; defaults to the first property */
   loanPropertyMap?: Record<string, number>;
+  /** KiwiSaver contribution rate applied to PAYE streams (dropdown: 3–10%) */
+  kiwiSaverRate?: number;
+  /** manual gross annual salaries per applicant — used for manual fact-find
+   *  entry, and as the income source when no feed stream is classified */
+  manualGrossAnnual?: number[];
 }
 
 export interface BuiltClient {
@@ -80,7 +85,7 @@ export function autoClassifyStreams(streams: DetectedIncomeStream[]): Record<str
 export function buildClientFromIntake(form: IntakeForm, feed: FeedSnapshot, tax: TaxTable): BuiltClient {
   const assumptions: string[] = [];
   const id = `intake-${form.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-  const adults = (form.applicantNames.length >= 2 ? 2 : 1) as 1 | 2;
+  const adults = Math.max(1, Math.min(4, form.applicantNames.length));
 
   // --- Properties ----------------------------------------------------------
   const properties: Property[] = form.properties.map((p, i) => ({
@@ -125,6 +130,21 @@ export function buildClientFromIntake(form: IntakeForm, feed: FeedSnapshot, tax:
   const roles = { ...autoClassifyStreams(analysis.incomeStreams), ...(form.streamRoles ?? {}) };
 
   const incomesByApplicant: IncomeLine[][] = form.applicantNames.map(() => []);
+  // Manual fact-find entry: gross salaries keyed directly by the adviser.
+  // They take effect for any applicant with a manual figure; feed-classified
+  // streams for that applicant are then treated as confirmation, not doubled.
+  (form.manualGrossAnnual ?? []).forEach((gross, i) => {
+    if (gross > 0 && incomesByApplicant[i]) {
+      incomesByApplicant[i].push({
+        id: `manual-salary-${i + 1}`,
+        kind: 'salary',
+        label: 'Salary (manual entry)',
+        grossAnnual: gross,
+        kiwiSaverRate: form.kiwiSaverRate ?? ASSUMED_KIWISAVER_RATE,
+      });
+    }
+  });
+
   let boarderPerWeek = 0;
   let feedRentPerWeek = 0;
   for (const s of analysis.incomeStreams) {
@@ -139,8 +159,9 @@ export function buildClientFromIntake(form: IntakeForm, feed: FeedSnapshot, tax:
       continue;
     }
     const applicantIdx = role.endsWith('2') && form.applicantNames.length > 1 ? 1 : 0;
+    if (incomesByApplicant[applicantIdx]?.some((l) => l.id.startsWith('manual-salary')) && role.startsWith('salary')) continue;
     const kind = role.startsWith('salary') ? 'salary' : role.startsWith('overtime') ? 'overtime-commission' : 'self-employed';
-    const ksRate = kind === 'self-employed' ? 0 : ASSUMED_KIWISAVER_RATE;
+    const ksRate = kind === 'self-employed' ? 0 : form.kiwiSaverRate ?? ASSUMED_KIWISAVER_RATE;
     const grossAnnual = grossFromNetMonthly(s.monthlyAverage, ksRate, tax);
     incomesByApplicant[applicantIdx].push({
       id: `${id}-inc-${incomesByApplicant[applicantIdx].length}-${applicantIdx}`,

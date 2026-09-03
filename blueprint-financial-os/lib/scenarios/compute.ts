@@ -99,19 +99,7 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
   const lenderComparison = compareLenders(client, lenders, ctx.tax, state.servicingOpts);
   const equity = computeEquity(client, policy, ctx.modelling);
 
-  // --- Amortisation: current path (actual repayments) vs Blueprint path
-  const loanInputs = client.mortgages.map((m) => ({
-    principal: m.balance,
-    annualRate: m.rate,
-    years: m.termRemainingYears,
-    interestOnly: m.interestOnly,
-    offsetBalance: m.offsetBalance ?? (state.revolving && m === client.mortgages[0] ? 0 : undefined),
-  }));
-  const current = combinedTrajectory(loanInputs, 0);
-  const revolvingOffsetExtra = state.revolving ? (state.revolving.funded * (ctx.policy.stressRate * 0)) : 0; // offset handled in revolving module
-  const blueprint = combinedTrajectory(loanInputs, state.extraRepaymentMonthly + revolvingOffsetExtra);
-
-  // --- FHB
+  // --- FHB (before amortisation: the proposed loan drives the FHB payoff path)
   let fhb: FhbResult | undefined;
   if (client.targetPurchase) {
     fhb = computeFhb(client.targetPurchase, policy, ctx.fhbCosts, {
@@ -123,8 +111,29 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
       ownershipOverrides: state.ownershipCosts,
       cashback: ctx.cashback,
       cashbackOverride: state.cashbackOverride,
+      upfrontCostOverrides: state.upfrontCostOverrides,
     });
   }
+
+  // --- Amortisation: current path (actual repayments) vs Blueprint path.
+  // FHB files with no existing mortgages amortise the PROPOSED loan, so
+  // mortgage-free dates project forward from the purchase instead of showing
+  // the current year.
+  const loanInputs =
+    client.mortgages.length > 0
+      ? client.mortgages.map((m) => ({
+          principal: m.balance,
+          annualRate: m.rate,
+          years: m.termRemainingYears,
+          interestOnly: m.interestOnly,
+          offsetBalance: m.offsetBalance ?? (state.revolving && m === client.mortgages[0] ? 0 : undefined),
+        }))
+      : fhb && fhb.loan > 0
+        ? [{ principal: fhb.loan, annualRate: fhb.effectiveRate, years: fhb.termYears }]
+        : [];
+  const emptyTrajectory = { schedule: [], totalInterest: 0, termYears: 0, payoffYear: new Date().getFullYear(), paidOff: false };
+  const current = loanInputs.length > 0 ? combinedTrajectory(loanInputs, 0) : emptyTrajectory;
+  const blueprint = loanInputs.length > 0 ? combinedTrajectory(loanInputs, state.extraRepaymentMonthly) : emptyTrajectory;
 
   // --- Investment (proposed purchase in this scenario)
   let investment: InvestmentResult | undefined;
@@ -260,7 +269,7 @@ export function computeAll(state: ScenarioState, ctx: RuleContext): CalculationR
     monthlySurplus: actualNetIncomeMonthly - declaredSpendMonthly - actualRepaymentsMonthly - state.extraRepaymentMonthly,
     umi: servicing.umi,
     maxLendingRange: lenderComparison.range,
-    mortgageFreeYear: client.mortgages.length > 0 && blueprint.paidOff ? blueprint.payoffYear : null,
+    mortgageFreeYear: loanInputs.length > 0 && blueprint.paidOff ? blueprint.payoffYear : null,
     interestRemaining: blueprint.totalInterest,
     kiwiSaverNow,
     kiwiSaverProjected: kiwiSaverProjections.reduce((s, p) => s + p.base.atHorizon, 0),

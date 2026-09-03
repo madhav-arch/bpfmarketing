@@ -12,6 +12,9 @@ import type { SectionProps } from './types';
 
 type DollarMode = 'nominal' | 'today';
 
+/** Statutory KiwiSaver employee contribution rates (dropdown, not free text). */
+const KS_RATE_OPTIONS = [0.03, 0.035, 0.04, 0.06, 0.08, 0.1];
+
 // ---------------------------------------------------------------------------
 // 06 — KiwiSaver & retirement trajectory
 
@@ -176,38 +179,121 @@ export function FutureSection(props: SectionProps) {
         </Card>
       </div>
 
-      {client.financialEvents.length > 0 ? (
+      {client.financialEvents.length > 0 || !presentation ? (
         <Card className="mt-4 p-6">
-          <h3 className="font-display text-[15px] font-semibold text-ink">Life events on the timeline</h3>
-          <p className="mt-0.5 text-[12.5px] text-slate-500b">Events with a monthly impact change the trajectory from their effective date — they are inputs, not decoration.</p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            {[...client.financialEvents]
-              .sort((a, b) => a.startDate.localeCompare(b.startDate))
-              .map((e) => (
-                <div key={e.id} className="min-w-[180px] flex-1 rounded-lg border border-line bg-mist px-4 py-3">
-                  <div className="num text-[11px] font-semibold uppercase tracking-[0.1em] text-teal-500">
-                    {e.startDate.slice(0, 7)}
-                    {e.endDate ? ` → ${e.endDate.slice(0, 7)}` : ''}
-                  </div>
-                  <div className="mt-1 text-[13px] font-medium leading-snug text-ink">{e.label}</div>
-                  {e.monthlyImpact ? (
-                    <div className={`num mt-1 text-[12px] font-semibold ${e.monthlyImpact > 0 ? 'text-green-600b' : 'text-rose-600b'}`}>
-                      {money(e.monthlyImpact, { sign: true })}/mo
-                    </div>
-                  ) : e.amount ? (
-                    <div className="num mt-1 text-[12px] font-semibold text-ink">{money(e.amount)}</div>
-                  ) : null}
-                </div>
-              ))}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-display text-[15px] font-semibold text-ink">Life events on the timeline</h3>
+            {!presentation ? <AddLifeEvent addChanges={addChanges} /> : null}
           </div>
+          <p className="mt-0.5 text-[12.5px] text-slate-500b">Events with a monthly impact change the trajectory from their effective date — they are inputs, not decoration.</p>
+          {client.financialEvents.length > 0 ? (
+            <div className="mt-4 flex flex-wrap gap-3">
+              {[...client.financialEvents]
+                .sort((a, b) => a.startDate.localeCompare(b.startDate))
+                .map((e) => (
+                  <div key={e.id} className="min-w-[180px] flex-1 rounded-lg border border-line bg-mist px-4 py-3">
+                    <div className="num text-[11px] font-semibold uppercase tracking-[0.1em] text-teal-500">
+                      {e.startDate.slice(0, 7)}
+                      {e.endDate ? ` → ${e.endDate.slice(0, 7)}` : ''}
+                    </div>
+                    <div className="mt-1 text-[13px] font-medium leading-snug text-ink">{e.label}</div>
+                    {e.monthlyImpact ? (
+                      <div className={`num mt-1 text-[12px] font-semibold ${e.monthlyImpact > 0 ? 'text-green-600b' : 'text-rose-600b'}`}>
+                        {money(e.monthlyImpact, { sign: true })}/mo
+                      </div>
+                    ) : e.amount ? (
+                      <div className="num mt-1 text-[12px] font-semibold text-ink">{money(e.amount)}</div>
+                    ) : null}
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-[12.5px] text-slate-500b">
+              Nothing on the timeline yet — add what's coming: upgrading the home, caring for parents, parental leave, childcare finishing.
+            </p>
+          )}
           {!presentation ? (
             <p className="mt-3 text-[11.5px] text-slate-500b">
-              Add events from the copilot: “Childcare finishes in June 2029”, “Model six months of parental leave”.
+              You can also add events from the copilot: “Childcare finishes in June 2029”, “Model six months of parental leave”.
             </p>
           ) : null}
         </Card>
       ) : null}
     </section>
+  );
+}
+
+// Manual life-event entry — same deterministic path as the copilot (addEvent).
+function AddLifeEvent({ addChanges }: { addChanges: SectionProps['addChanges'] }) {
+  const [open, setOpen] = useState(false);
+  const [eventLabel, setEventLabel] = useState('');
+  const [startMonth, setStartMonth] = useState('');
+  const [monthlyImpact, setMonthlyImpact] = useState('');
+  const currentYear = new Date().getFullYear();
+
+  const commit = () => {
+    if (!eventLabel.trim()) return;
+    const start = /^\d{4}-\d{2}$/.test(startMonth) ? `${startMonth}-01` : `${currentYear + 1}-01-01`;
+    const impact = parseFloat(monthlyImpact.replace(/[^0-9.-]/g, ''));
+    addChanges([
+      {
+        kind: 'addEvent',
+        event: {
+          id: `evt-${Date.now()}`,
+          kind: 'other',
+          label: eventLabel.trim(),
+          startDate: start,
+          monthlyImpact: Number.isFinite(impact) && impact !== 0 ? impact : undefined,
+        },
+      },
+    ]);
+    setEventLabel('');
+    setStartMonth('');
+    setMonthlyImpact('');
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="rounded-lg border border-teal-500/50 px-3 py-1.5 text-[12px] font-semibold text-teal-500 hover:bg-aqua-100"
+      >
+        + Add life event
+      </button>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        autoFocus
+        value={eventLabel}
+        onChange={(e) => setEventLabel(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        placeholder="e.g. Upgrade the home · Care for parents"
+        className="w-52 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12.5px] focus:border-teal-500 focus:outline-none"
+      />
+      <input
+        value={startMonth}
+        onChange={(e) => setStartMonth(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        placeholder={`from (${currentYear + 1}-06)`}
+        className="w-28 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12.5px] focus:border-teal-500 focus:outline-none"
+      />
+      <input
+        value={monthlyImpact}
+        onChange={(e) => setMonthlyImpact(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        placeholder="$/mo impact (− cost)"
+        className="w-36 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12.5px] focus:border-teal-500 focus:outline-none"
+      />
+      <button onClick={commit} className="rounded-lg bg-teal-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-teal-400">
+        Add
+      </button>
+      <button onClick={() => setOpen(false)} className="text-[12px] text-slate-500b hover:text-ink">
+        cancel
+      </button>
+    </div>
   );
 }
 
@@ -230,7 +316,10 @@ function KiwiSaverModeller({ client, result, addChanges, presentation, ctx, mode
 
   const fundComparison = useMemo(() => {
     if (!acc) return [];
-    return dataset.categories.map((cat) => {
+    // Simplified per adviser audit (3 Sep 2026): keep growth and balanced as
+    // the comparison anchors, plus the client's own fund type when different.
+    const keep = new Set(['balanced', 'growth', acc.fundType === 'defensive' ? 'conservative' : acc.fundType]);
+    return dataset.categories.filter((cat) => keep.has(cat.fundType)).map((cat) => {
       const total = client.kiwiSaverAccounts.reduce((sum, a) => {
         const p = projectKiwiSaver(a, ctx.kiwiSaver, {
           mode: 'base',
@@ -256,7 +345,15 @@ function KiwiSaverModeller({ client, result, addChanges, presentation, ctx, mode
       {!presentation ? (
         <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3 lg:grid-cols-6">
           <ModellerControl label="Contribution rate">
-            <EditableValue value={acc.contributionRate} format="percent" decimals={1} onCommit={(v) => addChanges([{ kind: 'setKiwiSaverRate', rate: v }])} />
+            <select
+              value={String(acc.contributionRate)}
+              onChange={(e) => addChanges([{ kind: 'setKiwiSaverRate', rate: parseFloat(e.target.value) }])}
+              className="num rounded-lg border border-line bg-white px-2 py-1 text-[13px] font-semibold text-ink focus:border-teal-500 focus:outline-none"
+            >
+              {(KS_RATE_OPTIONS.includes(acc.contributionRate) ? KS_RATE_OPTIONS : [acc.contributionRate, ...KS_RATE_OPTIONS]).map((r) => (
+                <option key={r} value={String(r)}>{pct(r, 1)}</option>
+              ))}
+            </select>
           </ModellerControl>
           <ModellerControl label="Return assumption" note="net of fees when overridden">
             <EditableValue
@@ -302,7 +399,7 @@ function KiwiSaverModeller({ client, result, addChanges, presentation, ctx, mode
           <h4 className="text-[13px] font-semibold text-ink">Fund-type comparison at age {client.retirement.targetAge} ({mode === 'nominal' ? 'nominal' : "today's dollars"})</h4>
           <span className="text-[10.5px] text-slate-500b">{dataset.sourceLabel} · as at {dataset.asAt}</span>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3">
           {fundComparison.map((f) => {
             const isCurrent = f.fundType === acc.fundType || (f.fundType === 'conservative' && acc.fundType === 'defensive');
             return (

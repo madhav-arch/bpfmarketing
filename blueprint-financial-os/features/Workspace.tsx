@@ -10,7 +10,7 @@ import { describeChange, type ScenarioChange } from '@/lib/scenarios/changes';
 import { buildOverrideLog, type ChangeEntry } from '@/lib/scenarios/overrides';
 import { DATA_STATUS_LABELS, type DataStatus } from '@/lib/data-sources/providers';
 import { AuditDrawer, Pill, type AuditRequest } from '@/components/ui';
-import { money, moneyShort } from '@/lib/format';
+import { money, moneyShort, moneyTenKShort } from '@/lib/format';
 import { GoalsSection, TodaySection, BankViewSection, CapacitySection } from './CoreSections';
 import { OptionsSection } from './OptionsSection';
 import { FutureSection, ProtectionSection } from './PlanningSections';
@@ -591,7 +591,7 @@ export default function Workspace() {
                 />
               ) : null}
               <SnapRow2 label="Monthly buffer" a={money(b.monthlySurplus)} b={showBlueprintCol ? money(s.monthlySurplus) : undefined} better={s.monthlySurplus > b.monthlySurplus + 40 ? 'b' : s.monthlySurplus < b.monthlySurplus - 40 ? 'a' : undefined} />
-              <SnapRow2 label="Capacity" a={`${moneyShort(b.maxLendingRange.min)}–${moneyShort(b.maxLendingRange.max)}`} b={showBlueprintCol ? `${moneyShort(s.maxLendingRange.min)}–${moneyShort(s.maxLendingRange.max)}` : undefined} />
+              <SnapRow2 label="Capacity" a={`${moneyTenKShort(b.maxLendingRange.min)}–${moneyTenKShort(b.maxLendingRange.max)}`} b={showBlueprintCol ? `${moneyTenKShort(s.maxLendingRange.min)}–${moneyTenKShort(s.maxLendingRange.max)}` : undefined} />
               {b.usableEquity > 0 || s.usableEquity > 0 ? (
                 <SnapRow2 label="Usable equity" a={moneyShort(b.usableEquity)} b={showBlueprintCol ? moneyShort(s.usableEquity) : undefined} better={s.usableEquity > b.usableEquity + 1000 ? 'b' : undefined} />
               ) : null}

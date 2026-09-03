@@ -18,6 +18,17 @@ export function moneyShort(n: number): string {
   return `${neg}$${Math.round(abs).toLocaleString()}`;
 }
 
+/** Capacity display: rounded to the nearest $10,000 — banks quote borrowing
+ *  power roughly, and false precision misleads. Engine values stay exact. */
+export function moneyTenK(n: number): string {
+  return `$${(Math.round(n / 10_000) * 10_000).toLocaleString('en-NZ')}`;
+}
+
+/** Compact form of the $10,000-rounded capacity: $800k, $1.03m. */
+export function moneyTenKShort(n: number): string {
+  return moneyShort(Math.round(n / 10_000) * 10_000);
+}
+
 export function pct(n: number, decimals = 2): string {
   return `${(n * 100).toFixed(decimals)}%`;
 }

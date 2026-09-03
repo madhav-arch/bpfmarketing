@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AuditLine } from '@/lib/domain/types';
-import { money, pct } from '@/lib/format';
+import { money, moneyTenK, pct } from '@/lib/format';
 
 // ---------------------------------------------------------------------------
 
@@ -62,7 +62,7 @@ export function AnimatedNumber({
   className = '',
 }: {
   value: number;
-  format?: 'money' | 'percent' | 'plain' | 'years' | 'year';
+  format?: 'money' | 'money10k' | 'percent' | 'plain' | 'years' | 'year';
   decimals?: number;
   className?: string;
 }) {
@@ -95,13 +95,15 @@ export function AnimatedNumber({
   const text =
     format === 'money'
       ? money(display, { decimals })
-      : format === 'percent'
-        ? pct(display, decimals || 2)
-        : format === 'years'
-          ? `${display.toFixed(1)} yrs`
-          : format === 'year'
-            ? `${Math.round(display)}`
-            : display.toLocaleString('en-NZ', { maximumFractionDigits: decimals });
+      : format === 'money10k'
+        ? moneyTenK(display)
+        : format === 'percent'
+          ? pct(display, decimals || 2)
+          : format === 'years'
+            ? `${display.toFixed(1)} yrs`
+            : format === 'year'
+              ? `${Math.round(display)}`
+              : display.toLocaleString('en-NZ', { maximumFractionDigits: decimals });
 
   return <span className={`num ${flash ? 'bp-flash' : ''} ${className}`}>{text}</span>;
 }
@@ -118,7 +120,7 @@ export function Stat({
 }: {
   label: string;
   value: number;
-  format?: 'money' | 'percent' | 'plain' | 'years' | 'year';
+  format?: 'money' | 'money10k' | 'percent' | 'plain' | 'years' | 'year';
   decimals?: number;
   sub?: ReactNode;
   tone?: 'default' | 'navy';

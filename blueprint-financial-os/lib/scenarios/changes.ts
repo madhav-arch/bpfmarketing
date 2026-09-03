@@ -50,7 +50,11 @@ export type ScenarioChange =
   | { kind: 'removeDebt'; debtId?: string; debtKind?: 'personal-loan' | 'credit-card' | 'store-card' | 'other' }
   | { kind: 'setKiwiSaverReturn'; value: number }
   | { kind: 'setFixedCommitment'; label: string; monthly: number }
-  | { kind: 'setExpenseActual'; category: string; monthly: number };
+  | { kind: 'setExpenseActual'; category: string; monthly: number }
+  | { kind: 'addGoal'; label: string; detail?: string }
+  | { kind: 'updateGoal'; goalId: string; label?: string; detail?: string }
+  | { kind: 'removeGoal'; goalId: string }
+  | { kind: 'setUpfrontCost'; key: string; amount: number };
 
 const frequency = z.enum(['weekly', 'fortnightly', 'monthly', 'annual']);
 
@@ -124,6 +128,10 @@ export const scenarioChangeSchema: z.ZodType<ScenarioChange> = z.discriminatedUn
   z.object({ kind: z.literal('setKiwiSaverReturn'), value: z.number().min(-0.02).max(0.12) }),
   z.object({ kind: z.literal('setFixedCommitment'), label: z.string(), monthly: z.number().min(0) }),
   z.object({ kind: z.literal('setExpenseActual'), category: z.string(), monthly: z.number().min(0) }),
+  z.object({ kind: z.literal('addGoal'), label: z.string().min(1), detail: z.string().optional() }),
+  z.object({ kind: z.literal('updateGoal'), goalId: z.string(), label: z.string().optional(), detail: z.string().optional() }),
+  z.object({ kind: z.literal('removeGoal'), goalId: z.string() }),
+  z.object({ kind: z.literal('setUpfrontCost'), key: z.string(), amount: z.number().min(0) }),
 ]);
 
 /** Human-readable chip label for a proposed change. */
@@ -169,5 +177,9 @@ export function describeChange(c: ScenarioChange): string {
     case 'setKiwiSaverReturn': return `KiwiSaver return → ${(c.value * 100).toFixed(1)}%/yr`;
     case 'setFixedCommitment': return `${c.label} → ${fmt(c.monthly)}/mo`;
     case 'setExpenseActual': return `${c.category} spend → ${fmt(c.monthly)}/mo`;
+    case 'addGoal': return `Goal added: ${c.label}`;
+    case 'updateGoal': return `Goal updated${c.label ? `: ${c.label}` : ''}`;
+    case 'removeGoal': return 'Goal removed';
+    case 'setUpfrontCost': return `${c.key.replace(/-/g, ' ')} cost → ${fmt(c.amount)}`;
   }
 }
